@@ -14,6 +14,7 @@ from utils import (
     geometry_from_geojson, compute_ndvi, compute_walkability, compute_pm25,
     compute_population, simulate_replacement_with_buildings
 )
+from hedera_blockchain import HederaBlockchainService
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,24 @@ def get_session_storage():
     from main import session_storage
     return session_storage
 
+async def log_agent_response(session_id: str, response: dict):
+    """Log agent response to HCS topic and include topic ID in response"""
+    try:
+        storage = get_session_storage()
+        hcs_topic_id = storage.get(session_id, {}).get("hcs_topic_id")
+
+        if hcs_topic_id:
+            hedera_service = HederaBlockchainService()
+            agent_message = response.get("reply", "")
+            await hedera_service.submit_chat_message(hcs_topic_id, "Agent", agent_message)
+
+            # Add HCS topic ID to response for frontend display
+            response["hcsTopicId"] = hcs_topic_id
+    except Exception as e:
+        logger.warning(f"Failed to log agent response to HCS (non-critical): {e}")
+
+    return response
+
 async def handle_agent_request(request: AgentRequest, client: genai.Client):
     """Handle agent requests and process user queries about parks"""
     try:
@@ -29,6 +48,34 @@ async def handle_agent_request(request: AgentRequest, client: genai.Client):
         ui_context = request.uiContext or {}
         selected_park_id = ui_context.get("selectedParkId")
         session_id = request.sessionId or str(int(datetime.now().timestamp() * 1000000) % 1000000)
+        wallet_address = request.walletAddress
+
+        # Initialize session storage and HCS topic for chat logging
+        storage = get_session_storage()
+        if session_id not in storage:
+            storage[session_id] = {}
+
+        # Create HCS topic for this chat session if not already created
+        if "hcs_topic_id" not in storage[session_id]:
+            try:
+                hedera_service = HederaBlockchainService()
+                topic_result = await hedera_service.create_chat_topic(session_id)
+                if topic_result.get('success'):
+                    storage[session_id]["hcs_topic_id"] = topic_result.get('topic_id')
+                    logger.info(f"✅ HCS topic created for session {session_id}: {topic_result.get('topic_id')}")
+                else:
+                    logger.warning(f"Failed to create HCS topic: {topic_result.get('error')}")
+            except Exception as e:
+                logger.warning(f"HCS topic creation failed (non-critical): {e}")
+
+        # Log user message to HCS topic
+        hcs_topic_id = storage[session_id].get("hcs_topic_id")
+        if hcs_topic_id:
+            try:
+                hedera_service = HederaBlockchainService()
+                await hedera_service.submit_chat_message(hcs_topic_id, "User", message)
+            except Exception as e:
+                logger.warning(f"Failed to log user message to HCS (non-critical): {e}")
 
         # Enhanced prompt for structured output with more examples
         prompt = f"""Analyze this user query about parks and classify the intent:
@@ -71,12 +118,33 @@ Examples:
 - "hello" -> greeting intent"""
 
         try:
+            # Use a simplified schema that doesn't use $ref or NULL
+            schema = {
+                "type": "OBJECT",
+                "properties": {
+                    "intent": {
+                        "type": "STRING",
+                        "enum": [
+                            "show_parks", "ask_area", "greeting", "unknown",
+                            "park_removal_impact", "park_ndvi_query", "park_stat_query",
+                            "park_info_query", "air_quality_query", "create_proposal"
+                        ]
+                    },
+                    "locationType": {"type": "STRING"},
+                    "locationValue": {"type": "STRING"},
+                    "unit": {"type": "STRING"},
+                    "landUseType": {"type": "STRING"},
+                    "metric": {"type": "STRING"}
+                },
+                "required": ["intent"]
+            }
+
             response = client.models.generate_content(
                 model="gemini-2.0-flash-exp",
                 contents=prompt,
                 config={
                     "response_mime_type": "application/json",
-                    "response_schema": IntentClassification,
+                    "response_schema": schema,
                 }
             )
             logger.info(f"Gemini structured response: {response.text}")
@@ -91,30 +159,40 @@ Examples:
         logger.info(f"Parsed intent: {parsed.get('intent')}")
 
         if parsed.get("intent") == "show_parks":
-            return await handle_show_parks_intent(parsed, session_id)
+            response = await handle_show_parks_intent(parsed, session_id)
+            return await log_agent_response(session_id, response)
         elif parsed.get("intent") == "ask_area":
-            return await handle_ask_area_intent(parsed, selected_park_id, session_id)
+            response = await handle_ask_area_intent(parsed, selected_park_id, session_id)
+            return await log_agent_response(session_id, response)
         elif parsed.get("intent") == "park_removal_impact":
-            return await handle_park_removal_impact_intent(parsed, selected_park_id, session_id)
+            response = await handle_park_removal_impact_intent(parsed, selected_park_id, session_id)
+            return await log_agent_response(session_id, response)
         elif parsed.get("intent") == "park_ndvi_query":
-            return await handle_park_ndvi_query_intent(selected_park_id, session_id)
+            response = await handle_park_ndvi_query_intent(selected_park_id, session_id)
+            return await log_agent_response(session_id, response)
         elif parsed.get("intent") == "park_stat_query":
-            return await handle_park_stat_query_intent(parsed, selected_park_id, session_id)
+            response = await handle_park_stat_query_intent(parsed, selected_park_id, session_id)
+            return await log_agent_response(session_id, response)
         elif parsed.get("intent") == "park_info_query":
-            return await handle_park_info_query_intent(selected_park_id, session_id, client)
+            response = await handle_park_info_query_intent(selected_park_id, session_id, client)
+            return await log_agent_response(session_id, response)
         elif parsed.get("intent") == "air_quality_query":
-            return await handle_air_quality_query_intent(selected_park_id, session_id)
+            response = await handle_air_quality_query_intent(selected_park_id, session_id)
+            return await log_agent_response(session_id, response)
         elif parsed.get("intent") == "create_proposal":
-            return await handle_create_proposal_intent(selected_park_id, session_id, message)
+            response = await handle_create_proposal_intent(selected_park_id, session_id, message, wallet_address)
+            return await log_agent_response(session_id, response)
         elif parsed.get("intent") == "greeting":
-            return handle_greeting_intent(session_id)
+            response = handle_greeting_intent(session_id)
+            return await log_agent_response(session_id, response)
 
         fallback_reply = "I'm ParkPulse.ai, your urban intelligence assistant. I can show parks by zipcode/city/state, analyze environmental impacts, or tell you about a selected park. Try asking: \"show parks in 90210\" or \"what happens if this park is removed?\""
-        return {
+        response = {
             "sessionId": session_id,
             "action": "answer",
             "reply": fallback_reply,
         }
+        return await log_agent_response(session_id, response)
 
     except Exception as e:
         logger.error(f"Error in agent endpoint: {str(e)}")
@@ -306,8 +384,30 @@ def handle_greeting_intent(session_id):
         "reply": reply,
     }
 
-async def handle_create_proposal_intent(selected_park_id, session_id, message):
+async def handle_create_proposal_intent(selected_park_id, session_id, message, wallet_address=None):
     """Handle create proposal intent"""
+    from supabase_client import check_user_authorization
+
+    # Check authorization first
+    auth_result = await check_user_authorization(wallet_address)
+
+    if not auth_result["authorized"]:
+        error_msg = auth_result.get("error", "Authorization required")
+
+        if error_msg and "not found" in error_msg.lower():
+            reply = "⚠️ **Authorization Required**\n\nOnly authorized government employees or invited city planners can create proposals.\n\nAre you an authorized user? Complete your profile to verify your government employee status."
+        else:
+            reply = "⚠️ **Authorization Required**\n\nOnly authorized government employees or invited city planners can create proposals.\n\nAre you an authorized user? Update your profile to verify your government employee status."
+
+        return {
+            "sessionId": session_id,
+            "action": "unauthorized",
+            "reply": reply,
+            "showProfileButton": True,
+        }
+
+    logger.info(f"User {wallet_address} authorized to create proposal")
+
     storage = get_session_storage()
 
     # Check if park removal analysis was performed first
@@ -323,14 +423,16 @@ async def handle_create_proposal_intent(selected_park_id, session_id, message):
 
     # Extract end date from message if provided
     end_date = "November 30, 2025"  # Default date
-    if "november 30" in message.lower() or "30th november" in message.lower():
-        end_date = "November 30, 2025"
-    elif "date" in message.lower() or "deadline" in message.lower():
-        import re
-        date_pattern = r'\b(\d{1,2}(?:st|nd|rd|th)?\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4})\b'
-        date_match = re.search(date_pattern, message.lower())
-        if date_match:
-            end_date = date_match.group(1).title()
+    if message:
+        message_lower = message.lower()
+        if "november 30" in message_lower or "30th november" in message_lower:
+            end_date = "November 30, 2025"
+        elif "date" in message_lower or "deadline" in message_lower:
+            import re
+            date_pattern = r'\b(\d{1,2}(?:st|nd|rd|th)?\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4})\b'
+            date_match = re.search(date_pattern, message_lower)
+            if date_match:
+                end_date = date_match.group(1).title()
 
     park_name = analysis_data.get("parkName", "Selected Park")
 
@@ -388,6 +490,42 @@ Based on the environmental impact analysis, removing {park_name} would significa
 *ParkPulse.ai - AI-Powered Urban Intelligence Platform*
 """
 
+    # Generate general description for frontend (without numbers)
+    frontend_description_prompt = f"""Generate a neutral, objective 600-character description for a community proposal about {park_name}.
+
+Environmental data:
+- Vegetation health would decline significantly
+- Air quality would worsen with increased pollution
+- Thousands of residents would lose access to green space
+- Community demographics include families with children and seniors
+
+Requirements:
+- Start with "This park"
+- Write in a factual, descriptive style
+- Describe what the park provides and potential impacts
+- Mention environmental and health impacts WITHOUT using specific numbers
+- Keep it around 600 characters (can be between 550-600)
+- Be neutral and objective, avoid advocacy language
+- Present facts about impacts, not calls to action
+- Include more details about the park's role in the community"""
+
+    try:
+        frontend_desc_response = client.models.generate_content(
+            model="gemini-2.0-flash-exp",
+            contents=frontend_description_prompt
+        )
+        frontend_description = frontend_desc_response.text.strip()
+
+        # Ensure it's under 600 characters
+        if len(frontend_description) > 600:
+            frontend_description = frontend_description[:597] + "..."
+
+        logger.info(f"Generated frontend description ({len(frontend_description)} chars): {frontend_description}")
+    except Exception as e:
+        logger.error(f"Error generating frontend description with Gemini: {e}")
+        # Fallback to a neutral description
+        frontend_description = f"This park provides essential green space serving thousands of local residents including families with children and seniors. Its removal would result in significantly reduced air quality, decreased vegetation health, and loss of recreational opportunities for the surrounding community. The park serves as a vital gathering place where neighbors connect and children play safely. The environmental impact would extend beyond the immediate area, affecting air quality and reducing the overall livability of the neighborhood for current and future residents."
+
     # Prepare proposal data for blockchain
     proposal_data = {
         "parkId": selected_park_id,
@@ -395,6 +533,7 @@ Based on the environmental impact analysis, removing {park_name} would significa
         "proposalSummary": proposal_summary,
         "endDate": end_date,
         "analysisData": analysis_data,
+        "frontendDescription": frontend_description,  # For proposals table
         "timestamp": datetime.now().isoformat()
     }
 
@@ -416,27 +555,63 @@ Based on the environmental impact analysis, removing {park_name} would significa
         blockchain_result = await blockchain_service.create_proposal_on_blockchain(proposal_data)
 
         if blockchain_result['success']:
-            # Send email notification
+            # Send email notifications to users in the same zip code
             try:
-                from email_service import send_proposal_notification_email
+                from email_service import email_service
+                from database import get_users_by_zip_code
+
                 proposal_id = blockchain_result.get('proposal_id', 0)
 
-                # Get a brief description from the analysis
-                description = f"Environmental Impact: NDVI change from {analysis_data.get('ndviBefore', 0):.3f} to {analysis_data.get('ndviAfter', 0):.3f}, PM2.5 increase of {analysis_data.get('pm25IncreasePercent', 0):.1f}%"
+                # Get park's zip code
+                park_zip = analysis_data.get('parkZip') or removal_analysis.get('parkZip')
 
-                email_sent = send_proposal_notification_email(
-                    park_name=park_name,
-                    proposal_id=proposal_id,
-                    end_date=end_date,
-                    description=description
-                )
+                # If we don't have zip in analysis, fetch from database
+                if not park_zip and selected_park_id:
+                    from database import get_supabase
+                    supabase = get_supabase()
+                    try:
+                        park_response = supabase.table('parks').select('park_zip').eq('park_id', selected_park_id).execute()
+                        if park_response.data and len(park_response.data) > 0:
+                            park_zip = park_response.data[0].get('park_zip')
+                    except Exception as e:
+                        logger.error(f"Error fetching park zip: {e}")
 
-                if email_sent:
-                    logger.info(f"Email notification sent for proposal #{proposal_id}")
+                if park_zip:
+                    # Get all users in this zip code
+                    users = await get_users_by_zip_code(park_zip)
+
+                    # Use short numbered summary from blockchain for email
+                    description = blockchain_result.get('email_summary',
+                        f"{park_name}: Environmental impact analysis shows significant changes to vegetation and air quality."
+                    )
+
+                    # Send email to each user
+                    emails_sent = 0
+                    for user in users:
+                        try:
+                            email_sent = email_service.send_proposal_notification(
+                                recipient_email=user['email'],
+                                park_name=park_name,
+                                proposal_id=proposal_id,
+                                end_date=end_date,
+                                description=description
+                            )
+                            if email_sent:
+                                emails_sent += 1
+                        except Exception as e:
+                            logger.error(f"Failed to send email to {user['email']}: {e}")
+
+                    if emails_sent > 0:
+                        logger.info(f"✅ Sent {emails_sent} email notifications to users in ZIP {park_zip} for proposal #{proposal_id}")
+                    else:
+                        logger.warning(f"⚠️ No emails sent for proposal #{proposal_id} (ZIP: {park_zip}, {len(users)} users found)")
                 else:
-                    logger.warning(f"Failed to send email notification for proposal #{proposal_id}")
+                    logger.warning(f"⚠️ Could not determine park ZIP code, no emails sent for proposal #{proposal_id}")
+
             except Exception as e:
-                logger.error(f"Error sending email notification: {e}")
+                logger.error(f"Error sending email notifications: {e}")
+                import traceback
+                traceback.print_exc()
 
             # Success - include blockchain details in reply
             reply = f"""Community proposal created for {park_name} with deadline {end_date}.

@@ -87,8 +87,13 @@ class HederaBlockchainService:
             seniors = int(demographics.get('seniors', 0))
             total_affected = int(analysis_data.get('affectedPopulation10MinWalk', 0))
 
-            # Generate description
-            description = await self._generate_blockchain_summary(
+            # Use frontend description (without numbers) for proposals table
+            # Generate blockchain summary (with numbers) for internal tracking
+            description = proposal_data.get('frontendDescription',
+                f"This park provides green space for the community. Its removal would impact air quality and vegetation health."
+            )
+
+            blockchain_summary = await self._generate_blockchain_summary(
                 proposal_data['proposalSummary'],
                 analysis_data
             )
@@ -132,9 +137,11 @@ class HederaBlockchainService:
             if result.get('success'):
                 return {
                     'success': True,
+                    'proposal_id': result.get('proposalId', result.get('proposal_id', 0)),  # Try both formats
                     'transaction_hash': result.get('transactionId'),
                     'status': result.get('status'),
-                    'explorer_url': f"https://hashscan.io/{self.network}/transaction/{result.get('transactionId')}"
+                    'explorer_url': f"https://hashscan.io/{self.network}/transaction/{result.get('transactionId')}",
+                    'email_summary': blockchain_summary  # Short summary with numbers for email
                 }
             else:
                 return {
@@ -314,6 +321,68 @@ Return only the factual summary."""
             'environmentalData': environmental_data,
             'demographics': demographics,
         }
+
+    async def create_chat_topic(self, session_id: str) -> Dict[str, Any]:
+        """Create HCS topic for chat session"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.hedera_service_url}/api/hcs/create-topic",
+                    json={"memo": f"ParkPulse Chat Session {session_id}"}
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                logger.info(f"✅ Created HCS topic {result.get('topicId')} for session {session_id}")
+                return {
+                    'success': True,
+                    'topic_id': result.get('topicId'),
+                    'explorer_url': f"https://hashscan.io/{self.network}/topic/{result.get('topicId')}"
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': result.get('error', 'Unknown error')
+                }
+        except Exception as e:
+            logger.error(f"Failed to create chat topic: {e}")
+            return {'success': False, 'error': str(e)}
+
+    async def submit_chat_message(self, topic_id: str, role: str, message: str) -> Dict[str, Any]:
+        """Submit chat message to HCS topic with User: or Agent: prefix"""
+        try:
+            # Format message with role prefix
+            formatted_message = f"{role}:{message}"
+
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.hedera_service_url}/api/hcs/submit",
+                    json={
+                        "topicId": topic_id,
+                        "message": formatted_message,
+                        "timestamp": datetime.now().isoformat(),
+                        "sessionId": topic_id  # Include for tracking
+                    }
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                logger.debug(f"Logged to HCS: {role}:{message[:50]}...")
+                return {
+                    'success': True,
+                    'transaction_id': result.get('transactionId')
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': result.get('error', 'Unknown error')
+                }
+        except Exception as e:
+            logger.warning(f"Failed to submit chat message to HCS: {e}")
+            # Don't fail the chat if HCS logging fails
+            return {'success': False, 'error': str(e)}
 
 
 # Maintain backward compatibility

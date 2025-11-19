@@ -6,6 +6,7 @@ class AgentRequest(BaseModel):
     message: str
     uiContext: Optional[Dict[str, Any]] = None
     sessionId: Optional[str] = None
+    walletAddress: Optional[str] = None
 
 class LocationQuery(BaseModel):
     zip: Optional[str] = None
