@@ -1,0 +1,9 @@
+# flow
+emulator-account.pkey
+imports
+.env
+parkpulse.pkey
+venv
+__pycache__
+parks.geojson
+.DS_Store

@@ -1,0 +1,320 @@
+"""
+Hedera Blockchain Service for ParkPulse.ai
+Communicates with Node.js Hedera microservice via REST API
+"""
+
+import os
+import httpx
+import logging
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+
+class HederaBlockchainService:
+    def __init__(self):
+        """Initialize Hedera blockchain service"""
+        self.hedera_service_url = os.getenv('HEDERA_SERVICE_URL', 'http://localhost:5000')
+        self.network = os.getenv('HEDERA_NETWORK', 'testnet')
+        self.timeout = httpx.Timeout(30.0, connect=10.0)
+
+        logger.info(f"Hedera Service URL: {self.hedera_service_url}")
+        logger.info(f"Network: {self.network}")
+
+    async def is_connected(self) -> bool:
+        """Check if Hedera service is accessible"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(f"{self.hedera_service_url}/health")
+                return response.status_code == 200
+        except Exception as e:
+            logger.error(f"Hedera service connection failed: {e}")
+            return False
+
+    async def get_contract_info(self) -> Dict[str, Any]:
+        """Get contract information"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    f"{self.hedera_service_url}/api/contract/info"
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.error(f"Failed to get contract info: {e}")
+            raise
+
+    async def create_proposal_on_blockchain(self, proposal_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a proposal on Hedera blockchain"""
+        try:
+            # Parse analysis data
+            analysis_data = proposal_data['analysisData']
+
+            # Convert datetime to Unix timestamp
+            end_date_str = proposal_data['endDate']
+            try:
+                parsed_date = datetime.strptime(end_date_str, "%B %d, %Y")
+                end_of_day = parsed_date.replace(hour=23, minute=59, second=59)
+                end_timestamp = int(end_of_day.timestamp())
+            except:
+                # Default to 30 days from now
+                end_timestamp = int(datetime.now().timestamp() + 30 * 24 * 3600)
+
+            # Ensure end date is in the future
+            current_time = int(datetime.now().timestamp())
+            buffer_time = 3600  # 1 hour buffer
+
+            if end_timestamp <= current_time + buffer_time:
+                logger.warning(f"End date too close, adding 30 days + buffer")
+                end_timestamp = current_time + (30 * 24 * 3600) + buffer_time
+
+            # Convert environmental data (multiply by 1e8 for precision as uint256)
+            ndvi_before = int(float(analysis_data.get('ndviBefore', 0)) * 1e8)
+            ndvi_after = int(float(analysis_data.get('ndviAfter', 0)) * 1e8)
+            pm25_before = int(float(analysis_data.get('pm25Before', 0)) * 1e8)
+            pm25_after = int(float(analysis_data.get('pm25After', 0)) * 1e8)
+            pm25_increase = int(float(analysis_data.get('pm25IncreasePercent', 0)) * 1e8)
+
+            ndvi_before_val = float(analysis_data.get('ndviBefore', 0))
+            ndvi_after_val = float(analysis_data.get('ndviAfter', 0))
+            vegetation_loss = int((ndvi_before_val - ndvi_after_val) * 100 * 1e8) if ndvi_before_val and ndvi_after_val else 0
+
+            # Prepare demographics
+            demographics = analysis_data.get('demographics', {})
+            children = int(demographics.get('kids', 0))
+            adults = int(demographics.get('adults', 0))
+            seniors = int(demographics.get('seniors', 0))
+            total_affected = int(analysis_data.get('affectedPopulation10MinWalk', 0))
+
+            # Generate description
+            description = await self._generate_blockchain_summary(
+                proposal_data['proposalSummary'],
+                analysis_data
+            )
+
+            # Get creator from proposal data or use a placeholder that the hedera-service will replace
+            # The hedera-service should use the operator's EVM address or user's wallet address
+            creator_address = proposal_data.get('creator', None)
+
+            # Prepare payload for Hedera service
+            hedera_payload = {
+                "parkName": proposal_data['parkName'],
+                "parkId": proposal_data['parkId'],
+                "description": description,
+                "endDate": end_timestamp,
+                "environmentalData": {
+                    "ndviBefore": ndvi_before,
+                    "ndviAfter": ndvi_after,
+                    "pm25Before": pm25_before,
+                    "pm25After": pm25_after,
+                    "pm25IncreasePercent": pm25_increase,
+                    "vegetationLossPercent": vegetation_loss
+                },
+                "demographics": {
+                    "children": children,
+                    "adults": adults,
+                    "seniors": seniors,
+                    "totalAffectedPopulation": total_affected
+                },
+                "creator": creator_address  # Will be set by hedera-service if None
+            }
+
+            # Call Hedera microservice
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.hedera_service_url}/api/contract/create-proposal",
+                    json=hedera_payload
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                return {
+                    'success': True,
+                    'transaction_hash': result.get('transactionId'),
+                    'status': result.get('status'),
+                    'explorer_url': f"https://hashscan.io/{self.network}/transaction/{result.get('transactionId')}"
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': result.get('error', 'Unknown error')
+                }
+
+        except Exception as e:
+            logger.error(f"Failed to create proposal: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'success': False, 'error': str(e)}
+
+    async def get_proposal(self, proposal_id: int) -> Optional[Dict[str, Any]]:
+        """Get proposal from blockchain"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    f"{self.hedera_service_url}/api/contract/proposal/{proposal_id}"
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                return self._parse_hedera_proposal(result.get('proposal'))
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to get proposal: {e}")
+            return None
+
+    async def get_all_active_proposals(self) -> List[int]:
+        """Get all active proposal IDs"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    f"{self.hedera_service_url}/api/contract/proposals/active"
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                return result.get('proposalIds', [])
+            return []
+
+        except Exception as e:
+            logger.error(f"Failed to get active proposals: {e}")
+            return []
+
+    async def has_user_voted(self, proposal_id: int, user_address: str) -> bool:
+        """Check if user has voted"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    f"{self.hedera_service_url}/api/contract/has-voted/{proposal_id}/{user_address}"
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                return result.get('hasVoted', False)
+            return False
+
+        except Exception as e:
+            logger.error(f"Failed to check if user voted: {e}")
+            return False
+
+    async def submit_vote(self, proposal_id: int, vote: bool, voter_address: str) -> Dict[str, Any]:
+        """Submit a vote"""
+        try:
+            payload = {
+                "proposalId": proposal_id,
+                "vote": vote,
+                "voter": voter_address
+            }
+
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.hedera_service_url}/api/contract/vote",
+                    json=payload
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                return {
+                    'success': True,
+                    'transaction_hash': result.get('transactionId'),
+                    'explorer_url': f"https://hashscan.io/{self.network}/transaction/{result.get('transactionId')}"
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': result.get('error', 'Unknown error')
+                }
+
+        except Exception as e:
+            logger.error(f"Failed to submit vote: {e}")
+            return {'success': False, 'error': str(e)}
+
+    async def _generate_blockchain_summary(self, full_summary: str, analysis_data: Dict) -> str:
+        """Generate a concise summary for blockchain storage"""
+        try:
+            from google import genai
+
+            client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
+
+            prompt = f"""Create a neutral data summary for a park proposal focusing only on NDVI and PM2.5 metrics.
+
+Key data points to include:
+- Park name: {analysis_data.get('parkName', 'Unknown')}
+- NDVI change: {analysis_data.get('ndviBefore', 0)} → {analysis_data.get('ndviAfter', 0)}
+- PM2.5 increase: {analysis_data.get('pm25IncreasePercent', 0)}%
+
+Requirements:
+- Must be between 230-240 characters exactly
+- Only include NDVI and PM2.5 data
+- Neutral factual tone only
+- No emotional words or judgments
+- Include exact numerical values
+
+Return only the factual summary."""
+
+            response = client.models.generate_content(
+                model="gemini-2.0-flash-exp",
+                contents=prompt
+            )
+
+            summary = response.text.strip()
+
+            # Ensure length constraints
+            if len(summary) < 230:
+                summary += " Environmental impact assessment indicates significant changes."
+            elif len(summary) > 240:
+                summary = summary[:240]
+
+            return summary
+
+        except Exception as e:
+            logger.warning(f"Failed to generate summary: {e}")
+            # Fallback summary
+            park_name = analysis_data.get('parkName', 'Park')
+            ndvi_before = analysis_data.get('ndviBefore', 0)
+            ndvi_after = analysis_data.get('ndviAfter', 0)
+            pm25_increase = analysis_data.get('pm25IncreasePercent', 0)
+
+            return f"{park_name}: NDVI {ndvi_before}→{ndvi_after}, PM2.5 +{pm25_increase}%"
+
+    def _parse_hedera_proposal(self, proposal: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse proposal from Hedera service format"""
+        if not proposal:
+            return None
+
+        # Convert uint256 values back to float (divide by 1e8)
+        env_data = proposal.get('environmentalData', {})
+        environmental_data = {
+            'ndviBefore': float(env_data.get('ndviBefore', 0)) / 1e8,
+            'ndviAfter': float(env_data.get('ndviAfter', 0)) / 1e8,
+            'pm25Before': float(env_data.get('pm25Before', 0)) / 1e8,
+            'pm25After': float(env_data.get('pm25After', 0)) / 1e8,
+            'pm25IncreasePercent': float(env_data.get('pm25IncreasePercent', 0)) / 1e8,
+            'vegetationLossPercent': float(env_data.get('vegetationLossPercent', 0)) / 1e8,
+        }
+
+        demographics = proposal.get('demographics', {})
+
+        return {
+            'id': proposal.get('id'),
+            'parkName': proposal.get('parkName'),
+            'parkId': proposal.get('parkId'),
+            'description': proposal.get('description'),
+            'yesVotes': proposal.get('yesVotes', 0),
+            'noVotes': proposal.get('noVotes', 0),
+            'endDate': proposal.get('endDate'),
+            'creator': proposal.get('creator'),
+            'status': proposal.get('status', 'active'),
+            'environmentalData': environmental_data,
+            'demographics': demographics,
+        }
+
+
+# Maintain backward compatibility
+BlockchainService = HederaBlockchainService
