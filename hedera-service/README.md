@@ -1,199 +1,314 @@
 # ParkPulse Hedera Service
 
-Node.js microservice that provides a REST API for interacting with Hedera Hashgraph blockchain.
+**Hedera Hashgraph microservice for ParkPulse.ai - Smart Contract & Consensus Service Integration**
 
-**Location**: `parkpulsebe/hedera-service/` - Integrated within the Python backend directory
+---
 
-## Features
+## 🔗 Deployed Contract Information
 
-- **Smart Contract Service**: Deploy and interact with ParkPulseCommunity Solidity contract
-- **Hedera Consensus Service (HCS)**: Immutable, timestamped voting logs
-- **Solidity Contracts**: Smart contracts located in `contracts/` directory
-- **REST API**: Python backend-friendly HTTP interface
-- **Multi-network**: Support for testnet and mainnet
+| Property | Value |
+|----------|-------|
+| **Contract Name** | ParkPulseCommunity |
+| **Contract ID** | `0.0.7298075` |
+| **HCS Topic ID** | `0.0.7284567` |
+| **Network** | Hedera Testnet |
+| **Explorer** | [View on HashScan](https://hashscan.io/testnet/contract/0.0.7298075) |
+| **Deployer Account** | `0.0.5523459` |
 
-## Directory Structure
+---
+
+## 📖 Overview
+
+This service provides a Node.js/Express microservice that interfaces with Hedera Hashgraph, handling:
+- **Smart Contract Interactions**: Deploy and interact with the ParkPulseCommunity Solidity contract
+- **Hedera Consensus Service (HCS)**: Immutable, timestamped proposal and voting logs
+- **REST API**: Python backend-friendly HTTP interface for blockchain operations
+
+---
+
+## 🏗️ Architecture
 
 ```
 parkpulsebe/hedera-service/
-├── contracts/           # Solidity smart contracts
-│   ├── ParkPulseCommunity.sol
-│   └── SimpleVoting.sol
-├── src/                # Node.js service code
-│   ├── index.js       # Main entry point
-│   ├── routes/        # API routes
-│   └── services/      # Hedera service logic
-├── scripts/           # Deployment scripts
-├── artifacts/         # Compiled contracts
-├── hardhat.config.js  # Hardhat configuration
-├── .env              # Environment variables
-└── package.json      # Node.js dependencies
+├── contracts/                 # Solidity smart contracts
+│   └── ParkPulseCommunity.sol # Main voting contract
+├── scripts/
+│   ├── compile.js            # Custom Solidity compiler
+│   └── deploy-contract.js    # Hedera deployment script
+├── src/
+│   ├── index.js              # Express server entry point
+│   ├── routes/               # API route handlers
+│   └── services/             # Hedera SDK services
+├── artifacts/                # Compiled contract artifacts (generated)
+├── hardhat.config.cjs        # Hardhat configuration
+├── package.json
+├── .env                      # Environment variables
+└── deployments-hedera.json   # Deployment records
 ```
 
-## Prerequisites
+---
 
-- Node.js 18+
-- Hedera testnet account (get from https://portal.hedera.com/)
+## ⚙️ Prerequisites
 
-## Installation
+- **Node.js**: v18.0.0 or higher
+- **npm**: v8.0.0 or higher
+- **Hedera Testnet Account**: With HBAR for gas fees
+- **Hedera Private Key**: ECDSA format
+
+---
+
+## 🚀 Quick Start
+
+### 1. Install Dependencies
 
 ```bash
 cd parkpulsebe/hedera-service
 npm install
 ```
 
-## Configuration
+### 2. Configure Environment
 
-1. Copy `.env.example` to `.env`:
-```bash
-cp .env.example .env
-```
+Create `.env` file (or copy from `.env.example`):
 
-2. Fill in your Hedera credentials:
 ```env
+PORT=5000
+
+# Hedera Network Configuration
 HEDERA_NETWORK=testnet
 HEDERA_ACCOUNT_ID=0.0.YOUR_ACCOUNT_ID
-HEDERA_PRIVATE_KEY=YOUR_PRIVATE_KEY
+HEDERA_PRIVATE_KEY=your_private_key_here
+
+# Deployed Contract & Topic
+HEDERA_CONTRACT_ID=0.0.7298075
+HEDERA_HCS_TOPIC_ID=0.0.7284567
 ```
 
-## Usage
+**⚠️ Important**: Never commit your `.env` file with real private keys!
 
-### Development
+### 3. Start the Service
+
 ```bash
+# Development mode (with auto-reload)
 npm run dev
-```
 
-### Production
-```bash
+# Production mode
 npm start
 ```
 
-The service will run on `http://localhost:5000`
+The service will be available at: `http://localhost:5000`
 
-## Deploy Smart Contract
+---
 
-1. Compile the Solidity contract to bytecode
-2. Deploy using the API:
+## 🔨 Smart Contract Development
 
-```bash
-curl -X POST http://localhost:5000/api/contract/deploy \
-  -H "Content-Type: application/json" \
-  -d '{"contractBytecode": "0x..."}'
-```
-
-3. Update `.env` with the returned contract ID
-
-## Create HCS Topic
+### Compile Contract
 
 ```bash
-curl -X POST http://localhost:5000/api/hcs/create-topic \
-  -H "Content-Type: application/json" \
-  -d '{"memo": "ParkPulse Voting Logs"}'
+npm run compile
 ```
 
-Update `.env` with the returned topic ID.
+This uses Hardhat with the following settings:
+- **Solidity Version**: 0.8.20
+- **Optimizer**: Enabled (1000 runs)
+- **Via IR**: true (for complex contracts)
 
-## API Endpoints
+**Output**: Artifacts are generated in `artifacts/contracts/ParkPulseCommunity.sol/`
 
-### Contract Operations
-
-- `GET /api/contract/info` - Get contract information
-- `POST /api/contract/deploy` - Deploy contract
-- `POST /api/contract/create-proposal` - Create proposal
-- `POST /api/contract/vote` - Submit vote
-- `GET /api/contract/proposal/:id` - Get proposal details
-- `GET /api/contract/proposals/active` - Get active proposals
-- `GET /api/contract/has-voted/:proposalId/:address` - Check if user voted
-
-### HCS Operations
-
-- `POST /api/hcs/create-topic` - Create HCS topic
-- `POST /api/hcs/submit` - Submit message to HCS
-- `GET /api/hcs/topic-info` - Get topic information
-
-## Example: Create Proposal
+### Deploy Contract
 
 ```bash
-curl -X POST http://localhost:5000/api/contract/create-proposal \
-  -H "Content-Type: application/json" \
-  -d '{
-    "parkName": "Central Park",
-    "parkId": "park_001",
-    "description": "Protect Central Park from development",
-    "endDate": 1735689600,
-    "environmentalData": {
-      "ndviBefore": 75000000,
-      "ndviAfter": 15000000,
-      "pm25Before": 1200000000,
-      "pm25After": 3500000000,
-      "pm25IncreasePercent": 19166666667,
-      "vegetationLossPercent": 60000000000
-    },
-    "demographics": {
-      "children": 5000,
-      "adults": 15000,
-      "seniors": 3000,
-      "totalAffectedPopulation": 23000
-    },
-    "creator": "0x0000000000000000000000000000000000000000"
-  }'
+npm run deploy
 ```
 
-## Example: Submit Vote
+This will:
+1. Compile the contract (if needed)
+2. Deploy to Hedera Testnet
+3. Save deployment info to `deployments-hedera.json`
+4. Display new contract ID and explorer link
+
+**After Deployment**:
+- Update `HEDERA_CONTRACT_ID` in `.env`
+- Update frontend `.env.local` with new contract ID
+- Restart the service
+
+---
+
+## 📡 API Endpoints
+
+### Health Check
 
 ```bash
-curl -X POST http://localhost:5000/api/contract/vote \
-  -H "Content-Type: application/json" \
-  -d '{
-    "proposalId": 1,
-    "vote": true,
-    "voter": "0xYOUR_WALLET_ADDRESS"
-  }'
+GET /health
 ```
 
-## Integration with Python Backend
+Returns service status and configuration.
 
-From your Python backend, call the Hedera service:
+### Contract Information
 
-```python
-import httpx
-
-HEDERA_SERVICE_URL = "http://localhost:5000"
-
-async def create_proposal_on_hedera(proposal_data):
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{HEDERA_SERVICE_URL}/api/contract/create-proposal",
-            json=proposal_data
-        )
-        return response.json()
+```bash
+GET /api/contract/info
 ```
 
-## Network Costs
+Response:
+```json
+{
+  "success": true,
+  "network": "testnet",
+  "accountId": "0.0.5523459",
+  "contractId": "0.0.7298075",
+  "explorerUrl": "https://hashscan.io/testnet"
+}
+```
 
-### Testnet
-- Free for testing
-- Get test HBAR from https://portal.hedera.com/
+### Create Proposal
 
-### Mainnet
-- Contract deployment: ~$1-2 USD
-- Create proposal: ~$0.01 USD
-- Submit vote: ~$0.005 USD
-- HCS message: $0.0008 USD
+```bash
+POST /api/contract/create-proposal
+Content-Type: application/json
 
-Much cheaper than Ethereum!
+{
+  "parkName": "Central Park",
+  "parkId": "park_001",
+  "description": "Protect from commercial development",
+  "endDate": 1735689600000,
+  "environmentalData": {
+    "ndviBefore": 850,
+    "ndviAfter": 400,
+    "pm25Before": 15,
+    "pm25After": 45,
+    "pm25IncreasePercent": 200,
+    "vegetationLossPercent": 53
+  },
+  "demographics": {
+    "children": 1200,
+    "adults": 3500,
+    "seniors": 800,
+    "totalAffectedPopulation": 5500
+  },
+  "creator": "0.0.5523459",
+  "fundraisingEnabled": false,
+  "fundingGoal": 0
+}
+```
 
-## Troubleshooting
+### Submit Vote
 
-### Error: "Insufficient balance"
-Get test HBAR from the Hedera portal or fund your account.
+```bash
+POST /api/contract/vote
+Content-Type: application/json
 
-### Error: "Contract not deployed"
-Deploy the contract first using `/api/contract/deploy`.
+{
+  "proposalId": 1,
+  "vote": true,
+  "voter": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb8"
+}
+```
 
-### Error: "HCS topic not created"
-Create a topic first using `/api/hcs/create-topic`.
+### Get Proposal
 
-## License
+```bash
+GET /api/contract/proposal/:id
+```
 
-MIT
+### Get Active Proposals
+
+```bash
+GET /api/contract/proposals/active
+```
+
+### Get Accepted Proposals
+
+```bash
+GET /api/contract/proposals/accepted
+```
+
+### Get Rejected Proposals
+
+```bash
+GET /api/contract/proposals/rejected
+```
+
+---
+
+## 🔐 Security Best Practices
+
+1. **Never commit private keys**: Always use environment variables
+2. **Testnet first**: Test thoroughly on testnet before mainnet
+3. **Rate limiting**: Implement in production environments
+4. **CORS configuration**: Configure allowed origins in production
+5. **Input validation**: All inputs are validated server-side
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run tests
+npm test
+
+# Test contract interaction
+curl http://localhost:5000/api/contract/info
+```
+
+---
+
+## 📦 Dependencies
+
+### Production
+- `@hashgraph/sdk`: Hedera JavaScript SDK
+- `express`: Web framework
+- `cors`: Cross-origin resource sharing
+- `dotenv`: Environment variable management
+- `ethers`: Ethereum utilities (for address handling)
+
+### Development
+- `hardhat`: Smart contract development framework
+- `@nomicfoundation/hardhat-toolbox`: Hardhat plugins
+- `solc`: Solidity compiler
+- `nodemon`: Auto-reload during development
+
+---
+
+## 🔄 Deployment Workflow
+
+1. **Develop Contract**: Edit `contracts/ParkPulseCommunity.sol`
+2. **Compile**: `npm run compile`
+3. **Test Locally**: Run integration tests
+4. **Deploy to Testnet**: `npm run deploy`
+5. **Verify on HashScan**: Check contract at explorer URL
+6. **Update Environment**: Update contract ID in all `.env` files
+7. **Deploy to Mainnet**: Change `HEDERA_NETWORK=mainnet` and redeploy
+
+---
+
+## 🐛 Troubleshooting
+
+### Contract Not Found
+- Ensure `HEDERA_CONTRACT_ID` in `.env` matches deployed contract
+- Check network matches (testnet vs mainnet)
+
+### Compilation Errors
+- Stack too deep? `viaIR: true` is enabled in hardhat.config.cjs
+- Check Solidity version matches (0.8.20)
+
+### Deployment Fails
+- Verify HBAR balance in deployer account
+- Check private key format (ECDSA, no `0x` prefix)
+- Ensure network connectivity to Hedera nodes
+
+### HashScan Verification
+- Partial match? Ensure optimizer runs = 1000
+- Full match achieved with current configuration
+
+---
+
+## 📚 Additional Resources
+
+- **Hedera Documentation**: https://docs.hedera.com/
+- **Hedera SDK (JS)**: https://github.com/hashgraph/hedera-sdk-js
+- **HashScan Explorer**: https://hashscan.io/
+- **Hardhat Documentation**: https://hardhat.org/
+
+---
+
+Made with ❤️ for ParkPulse.ai
