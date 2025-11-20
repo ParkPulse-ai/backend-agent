@@ -70,6 +70,11 @@ async def handle_agent_request(request: AgentRequest, client: genai.Client):
                 await hedera_service.submit_chat_message(hcs_topic_id, "User", message)
             except Exception as e:
                 logger.warning(f"Failed to log user message to HCS (non-critical): {e}")
+                
+        if storage[session_id].get("awaiting_fundraising_response") or storage[session_id].get("awaiting_funding_goal"):
+            logger.info(f"Continuing proposal creation flow for session {session_id}")
+            response = await handle_create_proposal_intent(selected_park_id, session_id, message, wallet_address)
+            return await log_agent_response(session_id, response)
 
         prompt = f"""Analyze this user query about parks and classify the intent:
 
@@ -192,15 +197,26 @@ Examples:
 async def handle_show_parks_intent(parsed, session_id):
     """Handle show parks intent"""
     query = LocationQuery()
-    if parsed.get("locationType") == "zip":
-        query.zip = parsed.get("locationValue")
-    elif parsed.get("locationType") == "city":
-        query.city = parsed.get("locationValue")
-    elif parsed.get("locationType") == "state":
-        query.state = parsed.get("locationValue")
+    location_value = parsed.get("locationValue", "")
+    location_type = parsed.get("locationType")
+
+    if not location_type and location_value:
+        if location_value.strip().isdigit() and len(location_value.strip()) == 5:
+            location_type = "zip"
+        elif len(location_value.strip()) == 2 and location_value.strip().isalpha():
+            location_type = "state"
+        else:
+            location_type = "city"
+
+    if location_type == "zip":
+        query.zip = location_value
+    elif location_type == "city":
+        query.city = location_value
+    elif location_type == "state":
+        query.state = location_value
 
     fc = await query_parks_by_location(query)
-    reply = f"Loaded {len(fc['features'])} park(s) for {parsed.get('locationType')}: {parsed.get('locationValue')}."
+    reply = f"Loaded {len(fc['features'])} park(s) for {location_type}: {location_value}."
 
     return {
         "sessionId": session_id,
@@ -375,7 +391,7 @@ def handle_greeting_intent(session_id):
     }
 
 async def handle_create_proposal_intent(selected_park_id, session_id, message, wallet_address=None):
-    """Handle create proposal intent"""
+    """Handle create proposal intent with fundraising questions"""
     from supabase_client import check_user_authorization
 
     # Check authorization first
@@ -407,8 +423,68 @@ async def handle_create_proposal_intent(selected_park_id, session_id, message, w
             "reply": "Please analyze the park removal first before creating a proposal. Ask 'what happens if removed' for the selected park.",
         }
 
+    if storage[session_id].get("awaiting_fundraising_response"):
+        message_lower = message.lower().strip()
+        if any(word in message_lower for word in ['yes', 'yeah', 'yep', 'sure', 'y', 'enable', 'fund']):
+            storage[session_id]["fundraising_enabled"] = True
+            storage[session_id]["awaiting_fundraising_response"] = False
+            storage[session_id]["awaiting_funding_goal"] = True
+
+            return {
+                "sessionId": session_id,
+                "action": "ask_funding_goal",
+                "reply": "Great! What funding goal are you planning for this proposal?\n\nPlease specify the amount in HBAR (e.g., '100 HBAR' or '1000').",
+            }
+        elif any(word in message_lower for word in ['no', 'nope', 'nah', 'n', 'skip', 'dont', "don't"]):
+            storage[session_id]["fundraising_enabled"] = False
+            storage[session_id]["funding_goal"] = 0
+            storage[session_id]["awaiting_fundraising_response"] = False
+
+            return await _create_proposal_with_settings(selected_park_id, session_id, message, wallet_address, storage)
+        else:
+            return {
+                "sessionId": session_id,
+                "action": "clarify_fundraising",
+                "reply": "I need a clear yes or no response. Would you like to enable fundraising if this proposal is accepted?\n\nRespond with 'yes' or 'no'.",
+            }
+
+    if storage[session_id].get("awaiting_funding_goal"):
+        import re
+        numbers = re.findall(r'\d+(?:,\d{3})*(?:\.\d+)?', message)
+        if numbers:
+            goal_hbar = float(numbers[0].replace(',', ''))
+            storage[session_id]["funding_goal"] = int(goal_hbar * 100000000)
+            storage[session_id]["awaiting_funding_goal"] = False
+            return await _create_proposal_with_settings(selected_park_id, session_id, message, wallet_address, storage)
+        else:
+            return {
+                "sessionId": session_id,
+                "action": "clarify_goal",
+                "reply": "Please specify a valid funding goal amount in HBAR.\n\nFor example: '100' or '500 HBAR'",
+            }
+    storage[session_id]["awaiting_fundraising_response"] = True
+
+    return {
+        "sessionId": session_id,
+        "action": "ask_fundraising",
+        "reply": "Would you like to enable fundraising if this proposal is accepted?\n\nThis will allow community members to donate HBAR to support the initiative.\n\nRespond with 'yes' or 'no'.",
+    }
+
+def _cleanup_proposal_session(storage, session_id):
+    """Clean up proposal creation session flags"""
+    if session_id in storage:
+        storage[session_id].pop("awaiting_fundraising_response", None)
+        storage[session_id].pop("awaiting_funding_goal", None)
+        storage[session_id].pop("fundraising_enabled", None)
+        storage[session_id].pop("funding_goal", None)
+
+async def _create_proposal_with_settings(selected_park_id, session_id, message, wallet_address, storage):
+    """Create the proposal with the configured fundraising settings"""
+
     removal_analysis = storage[session_id]["latest_removal_analysis"]
     analysis_data = removal_analysis["analysis_data"]
+    fundraising_enabled = storage[session_id].get("fundraising_enabled", False)
+    funding_goal = storage[session_id].get("funding_goal", 0)
 
     end_date = "November 30, 2025"
     if message:
@@ -518,7 +594,10 @@ Requirements:
         "endDate": end_date,
         "analysisData": analysis_data,
         "frontendDescription": frontend_description,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "fundraisingEnabled": fundraising_enabled,
+        "fundingGoal": funding_goal,
+        "creator": wallet_address
     }
 
     try:
@@ -526,6 +605,7 @@ Requirements:
         blockchain_service = BlockchainService()
         if not await blockchain_service.is_connected():
             logger.warning("Blockchain not connected, creating proposal locally only")
+            _cleanup_proposal_session(storage, session_id)
             return {
                 "sessionId": session_id,
                 "action": "proposal_created",
@@ -586,12 +666,14 @@ Requirements:
 
             reply = f"""Community proposal created for {park_name} with deadline {end_date}.
 
-✅ **Successfully submitted to Flow testnet blockchain!**
+✅ **Successfully submitted to Hedera testnet!**
 🔗 Transaction: {blockchain_result['transaction_hash'][:10]}...{blockchain_result['transaction_hash'][-8:]}
 🌐 View on explorer: {blockchain_result['explorer_url']}
+📝 Logged to HCS Topic: 0.0.7284567
 
 The proposal includes comprehensive environmental impact analysis and is ready for community review."""
 
+            _cleanup_proposal_session(storage, session_id)
             return {
                 "sessionId": session_id,
                 "action": "proposal_created",
@@ -608,6 +690,7 @@ The proposal includes comprehensive environmental impact analysis and is ready f
 
 The proposal has been created locally and includes comprehensive environmental impact analysis. It is ready for community review, but was not submitted to the blockchain."""
 
+            _cleanup_proposal_session(storage, session_id)
             return {
                 "sessionId": session_id,
                 "action": "proposal_created",
@@ -620,6 +703,7 @@ The proposal has been created locally and includes comprehensive environmental i
 
     except ImportError:
         logger.warning("Blockchain module not available")
+        _cleanup_proposal_session(storage, session_id)
         return {
             "sessionId": session_id,
             "action": "proposal_created",
@@ -628,6 +712,7 @@ The proposal has been created locally and includes comprehensive environmental i
         }
     except Exception as e:
         logger.error(f"Blockchain integration error: {str(e)}")
+        _cleanup_proposal_session(storage, session_id)
         return {
             "sessionId": session_id,
             "action": "proposal_created",

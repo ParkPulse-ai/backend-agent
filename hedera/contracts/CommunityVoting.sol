@@ -135,7 +135,9 @@ contract CommunityVoting {
         uint256 endDate,
         EnvironmentalData memory environmentalData,
         Demographics memory demographics,
-        string memory creatorAccountId
+        string memory creatorAccountId,
+        bool fundraisingEnabled,
+        uint256 fundingGoal
     ) public returns (uint64) {
         require(bytes(parkName).length > 0, "Park name cannot be empty");
         require(bytes(parkId).length > 0, "Park ID cannot be empty");
@@ -157,9 +159,14 @@ contract CommunityVoting {
         proposal.environmentalData = environmentalData;
         proposal.demographics = demographics;
         proposal.creatorAccountId = creatorAccountId;
-        proposal.fundingGoal = 0;
+
+        // Set fundraising parameters (will only be enabled if proposal is accepted)
+        proposal.fundingGoal = fundingGoal;
         proposal.totalFundsRaised = 0;
-        proposal.fundingEnabled = false;
+        proposal.fundingEnabled = false;  // Will be enabled when proposal is accepted if fundraisingEnabled is true
+
+        // Store whether fundraising should be enabled upon acceptance (using fundingGoal > 0 as indicator)
+        // When proposal is accepted, fundingEnabled will be set to true if fundingGoal > 0
 
         emit ProposalCreated(
             proposalId,
@@ -206,7 +213,11 @@ contract CommunityVoting {
         ProposalStatus newStatus = ProposalStatus.Declined;
         if (proposals[proposalId].yesVotes > proposals[proposalId].noVotes) {
             newStatus = ProposalStatus.Accepted;
-            proposals[proposalId].fundingEnabled = true;
+
+            // Enable fundraising only if a funding goal was set during proposal creation
+            if (proposals[proposalId].fundingGoal > 0) {
+                proposals[proposalId].fundingEnabled = true;
+            }
         }
 
         proposals[proposalId].status = newStatus;
@@ -221,6 +232,12 @@ contract CommunityVoting {
         proposalActive(proposalId)
     {
         proposals[proposalId].status = newStatus;
+
+        // Enable fundraising if proposal is accepted AND a funding goal was set
+        if (newStatus == ProposalStatus.Accepted && proposals[proposalId].fundingGoal > 0) {
+            proposals[proposalId].fundingEnabled = true;
+        }
+
         emit ProposalStatusUpdated(proposalId, newStatus);
     }
 

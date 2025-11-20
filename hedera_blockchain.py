@@ -59,21 +59,21 @@ class HederaBlockchainService:
                 logger.warning(f"End date too close, adding 30 days + buffer")
                 end_timestamp = current_time + (30 * 24 * 3600) + buffer_time
 
-            ndvi_before = int(float(analysis_data.get('ndviBefore', 0)) * 1e8)
-            ndvi_after = int(float(analysis_data.get('ndviAfter', 0)) * 1e8)
-            pm25_before = int(float(analysis_data.get('pm25Before', 0)) * 1e8)
-            pm25_after = int(float(analysis_data.get('pm25After', 0)) * 1e8)
-            pm25_increase = int(float(analysis_data.get('pm25IncreasePercent', 0)) * 1e8)
+            ndvi_before = max(0, int(float(analysis_data.get('ndviBefore', 0)) * 1e8))
+            ndvi_after = max(0, int(float(analysis_data.get('ndviAfter', 0)) * 1e8))
+            pm25_before = max(0, int(float(analysis_data.get('pm25Before', 0)) * 1e8))
+            pm25_after = max(0, int(float(analysis_data.get('pm25After', 0)) * 1e8))
+            pm25_increase = max(0, int(float(analysis_data.get('pm25IncreasePercent', 0)) * 1e8))
 
             ndvi_before_val = float(analysis_data.get('ndviBefore', 0))
             ndvi_after_val = float(analysis_data.get('ndviAfter', 0))
-            vegetation_loss = int((ndvi_before_val - ndvi_after_val) * 100 * 1e8) if ndvi_before_val and ndvi_after_val else 0
+            vegetation_loss = max(0, int((ndvi_before_val - ndvi_after_val) * 100 * 1e8)) if ndvi_before_val and ndvi_after_val else 0
 
             demographics = analysis_data.get('demographics', {})
-            children = int(demographics.get('kids', 0))
-            adults = int(demographics.get('adults', 0))
-            seniors = int(demographics.get('seniors', 0))
-            total_affected = int(analysis_data.get('affectedPopulation10MinWalk', 0))
+            children = max(0, int(demographics.get('kids', 0)))
+            adults = max(0, int(demographics.get('adults', 0)))
+            seniors = max(0, int(demographics.get('seniors', 0)))
+            total_affected = max(0, int(analysis_data.get('affectedPopulation10MinWalk', 0)))
 
             description = proposal_data.get('frontendDescription',
                 f"This park provides green space for the community. Its removal would impact air quality and vegetation health."
@@ -85,6 +85,9 @@ class HederaBlockchainService:
             )
 
             creator_address = proposal_data.get('creator', None)
+            fundraising_enabled = proposal_data.get('fundraisingEnabled', False)
+            funding_goal = proposal_data.get('fundingGoal', 0)
+
             hedera_payload = {
                 "parkName": proposal_data['parkName'],
                 "parkId": proposal_data['parkId'],
@@ -104,7 +107,9 @@ class HederaBlockchainService:
                     "seniors": seniors,
                     "totalAffectedPopulation": total_affected
                 },
-                "creator": creator_address
+                "creator": creator_address,
+                "fundraisingEnabled": fundraising_enabled,
+                "fundingGoal": funding_goal
             }
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -342,6 +347,9 @@ Return only the factual summary."""
             'status': proposal.get('status', 'active'),
             'environmentalData': environmental_data,
             'demographics': demographics,
+            'fundingEnabled': proposal.get('fundingEnabled', False),
+            'fundingGoal': proposal.get('fundingGoal', 0),
+            'totalFundsRaised': proposal.get('totalFundsRaised', 0),
         }
 
     async def create_chat_topic(self, session_id: str) -> Dict[str, Any]:
