@@ -3,7 +3,6 @@ pragma solidity ^0.8.20;
 
 contract CommunityVoting {
 
-    // Events
     event ProposalCreated(
         uint64 indexed proposalId,
         string parkName,
@@ -159,14 +158,9 @@ contract CommunityVoting {
         proposal.environmentalData = environmentalData;
         proposal.demographics = demographics;
         proposal.creatorAccountId = creatorAccountId;
-
-        // Set fundraising parameters (will only be enabled if proposal is accepted)
         proposal.fundingGoal = fundingGoal;
         proposal.totalFundsRaised = 0;
-        proposal.fundingEnabled = false;  // Will be enabled when proposal is accepted if fundraisingEnabled is true
-
-        // Store whether fundraising should be enabled upon acceptance (using fundingGoal > 0 as indicator)
-        // When proposal is accepted, fundingEnabled will be set to true if fundingGoal > 0
+        proposal.fundingEnabled = false;
 
         emit ProposalCreated(
             proposalId,
@@ -214,7 +208,6 @@ contract CommunityVoting {
         if (proposals[proposalId].yesVotes > proposals[proposalId].noVotes) {
             newStatus = ProposalStatus.Accepted;
 
-            // Enable fundraising only if a funding goal was set during proposal creation
             if (proposals[proposalId].fundingGoal > 0) {
                 proposals[proposalId].fundingEnabled = true;
             }
@@ -233,7 +226,6 @@ contract CommunityVoting {
     {
         proposals[proposalId].status = newStatus;
 
-        // Enable fundraising if proposal is accepted AND a funding goal was set
         if (newStatus == ProposalStatus.Accepted && proposals[proposalId].fundingGoal > 0) {
             proposals[proposalId].fundingEnabled = true;
         }
@@ -334,7 +326,6 @@ contract CommunityVoting {
     function getAllRejectedProposals() public view returns (uint64[] memory) {
         uint64 rejectedCount = 0;
 
-        // Count rejected proposals
         for (uint64 i = 1; i <= proposalCounter; i++) {
             if (proposals[i].status == ProposalStatus.Declined) {
                 rejectedCount++;

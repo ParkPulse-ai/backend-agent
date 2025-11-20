@@ -1,0 +1,9 @@
+{
+  "testnet": {
+    "contractId": "0.0.7297612",
+    "network": "testnet",
+    "deployedAt": "2025-11-20T16:16:32.246Z",
+    "explorerUrl": "https://hashscan.io/testnet/contract/0.0.7297612",
+    "accountId": "0.0.5523459"
+  }
+}

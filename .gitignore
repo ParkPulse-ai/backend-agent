@@ -5,3 +5,9 @@ venv
 __pycache__
 parks.geojson
 .DS_Store
+
+node_modules/
+cache/
+artifacts/
+deployments.json
+.env
