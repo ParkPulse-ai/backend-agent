@@ -1,8 +1,3 @@
-"""
-Hedera Blockchain Service for ParkPulse.ai
-Communicates with Node.js Hedera microservice via REST API
-"""
-
 import os
 import httpx
 import logging
@@ -48,28 +43,22 @@ class HederaBlockchainService:
     async def create_proposal_on_blockchain(self, proposal_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a proposal on Hedera blockchain"""
         try:
-            # Parse analysis data
             analysis_data = proposal_data['analysisData']
-
-            # Convert datetime to Unix timestamp
             end_date_str = proposal_data['endDate']
             try:
                 parsed_date = datetime.strptime(end_date_str, "%B %d, %Y")
                 end_of_day = parsed_date.replace(hour=23, minute=59, second=59)
                 end_timestamp = int(end_of_day.timestamp())
             except:
-                # Default to 30 days from now
                 end_timestamp = int(datetime.now().timestamp() + 30 * 24 * 3600)
 
-            # Ensure end date is in the future
             current_time = int(datetime.now().timestamp())
-            buffer_time = 3600  # 1 hour buffer
+            buffer_time = 3600
 
             if end_timestamp <= current_time + buffer_time:
                 logger.warning(f"End date too close, adding 30 days + buffer")
                 end_timestamp = current_time + (30 * 24 * 3600) + buffer_time
 
-            # Convert environmental data (multiply by 1e8 for precision as uint256)
             ndvi_before = int(float(analysis_data.get('ndviBefore', 0)) * 1e8)
             ndvi_after = int(float(analysis_data.get('ndviAfter', 0)) * 1e8)
             pm25_before = int(float(analysis_data.get('pm25Before', 0)) * 1e8)
@@ -80,15 +69,12 @@ class HederaBlockchainService:
             ndvi_after_val = float(analysis_data.get('ndviAfter', 0))
             vegetation_loss = int((ndvi_before_val - ndvi_after_val) * 100 * 1e8) if ndvi_before_val and ndvi_after_val else 0
 
-            # Prepare demographics
             demographics = analysis_data.get('demographics', {})
             children = int(demographics.get('kids', 0))
             adults = int(demographics.get('adults', 0))
             seniors = int(demographics.get('seniors', 0))
             total_affected = int(analysis_data.get('affectedPopulation10MinWalk', 0))
 
-            # Use frontend description (without numbers) for proposals table
-            # Generate blockchain summary (with numbers) for internal tracking
             description = proposal_data.get('frontendDescription',
                 f"This park provides green space for the community. Its removal would impact air quality and vegetation health."
             )
@@ -98,11 +84,7 @@ class HederaBlockchainService:
                 analysis_data
             )
 
-            # Get creator from proposal data or use a placeholder that the hedera-service will replace
-            # The hedera-service should use the operator's EVM address or user's wallet address
             creator_address = proposal_data.get('creator', None)
-
-            # Prepare payload for Hedera service
             hedera_payload = {
                 "parkName": proposal_data['parkName'],
                 "parkId": proposal_data['parkId'],
@@ -122,10 +104,9 @@ class HederaBlockchainService:
                     "seniors": seniors,
                     "totalAffectedPopulation": total_affected
                 },
-                "creator": creator_address  # Will be set by hedera-service if None
+                "creator": creator_address
             }
 
-            # Call Hedera microservice
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
                     f"{self.hedera_service_url}/api/contract/create-proposal",
@@ -137,11 +118,11 @@ class HederaBlockchainService:
             if result.get('success'):
                 return {
                     'success': True,
-                    'proposal_id': result.get('proposalId', result.get('proposal_id', 0)),  # Try both formats
+                    'proposal_id': result.get('proposalId', result.get('proposal_id', 0)),
                     'transaction_hash': result.get('transactionId'),
                     'status': result.get('status'),
                     'explorer_url': f"https://hashscan.io/{self.network}/transaction/{result.get('transactionId')}",
-                    'email_summary': blockchain_summary  # Short summary with numbers for email
+                    'email_summary': blockchain_summary
                 }
             else:
                 return {
@@ -162,6 +143,10 @@ class HederaBlockchainService:
                 response = await client.get(
                     f"{self.hedera_service_url}/api/contract/proposal/{proposal_id}"
                 )
+
+                if response.status_code == 404:
+                    return None
+
                 response.raise_for_status()
                 result = response.json()
 
@@ -169,8 +154,12 @@ class HederaBlockchainService:
                 return self._parse_hedera_proposal(result.get('proposal'))
             return None
 
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 404:
+                logger.error(f"Failed to get proposal {proposal_id}: {e}")
+            return None
         except Exception as e:
-            logger.error(f"Failed to get proposal: {e}")
+            logger.error(f"Failed to get proposal {proposal_id}: {e}")
             return None
 
     async def get_all_active_proposals(self) -> List[int]:
@@ -189,6 +178,42 @@ class HederaBlockchainService:
 
         except Exception as e:
             logger.error(f"Failed to get active proposals: {e}")
+            return []
+
+    async def get_all_accepted_proposals(self) -> List[int]:
+        """Get all accepted proposal IDs"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    f"{self.hedera_service_url}/api/contract/proposals/accepted"
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                return result.get('proposalIds', [])
+            return []
+
+        except Exception as e:
+            logger.error(f"Failed to get accepted proposals: {e}")
+            return []
+
+    async def get_all_rejected_proposals(self) -> List[int]:
+        """Get all rejected proposal IDs"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    f"{self.hedera_service_url}/api/contract/proposals/rejected"
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                return result.get('proposalIds', [])
+            return []
+
+        except Exception as e:
+            logger.error(f"Failed to get rejected proposals: {e}")
             return []
 
     async def has_user_voted(self, proposal_id: int, user_address: str) -> bool:
@@ -272,7 +297,6 @@ Return only the factual summary."""
 
             summary = response.text.strip()
 
-            # Ensure length constraints
             if len(summary) < 230:
                 summary += " Environmental impact assessment indicates significant changes."
             elif len(summary) > 240:
@@ -282,7 +306,6 @@ Return only the factual summary."""
 
         except Exception as e:
             logger.warning(f"Failed to generate summary: {e}")
-            # Fallback summary
             park_name = analysis_data.get('parkName', 'Park')
             ndvi_before = analysis_data.get('ndviBefore', 0)
             ndvi_after = analysis_data.get('ndviAfter', 0)
@@ -295,7 +318,6 @@ Return only the factual summary."""
         if not proposal:
             return None
 
-        # Convert uint256 values back to float (divide by 1e8)
         env_data = proposal.get('environmentalData', {})
         environmental_data = {
             'ndviBefore': float(env_data.get('ndviBefore', 0)) / 1e8,
@@ -334,7 +356,7 @@ Return only the factual summary."""
                 result = response.json()
 
             if result.get('success'):
-                logger.info(f"✅ Created HCS topic {result.get('topicId')} for session {session_id}")
+                logger.info(f"Created HCS topic {result.get('topicId')} for session {session_id}")
                 return {
                     'success': True,
                     'topic_id': result.get('topicId'),
@@ -352,7 +374,6 @@ Return only the factual summary."""
     async def submit_chat_message(self, topic_id: str, role: str, message: str) -> Dict[str, Any]:
         """Submit chat message to HCS topic with User: or Agent: prefix"""
         try:
-            # Format message with role prefix
             formatted_message = f"{role}:{message}"
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -362,7 +383,7 @@ Return only the factual summary."""
                         "topicId": topic_id,
                         "message": formatted_message,
                         "timestamp": datetime.now().isoformat(),
-                        "sessionId": topic_id  # Include for tracking
+                        "sessionId": topic_id
                     }
                 )
                 response.raise_for_status()
@@ -381,9 +402,136 @@ Return only the factual summary."""
                 }
         except Exception as e:
             logger.warning(f"Failed to submit chat message to HCS: {e}")
-            # Don't fail the chat if HCS logging fails
             return {'success': False, 'error': str(e)}
 
+    async def close_proposal(self, proposal_id: int) -> Dict[str, Any]:
+        """Close a proposal and finalize voting results"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.hedera_service_url}/api/contract/close-proposal",
+                    json={"proposalId": proposal_id}
+                )
+                response.raise_for_status()
+                result = response.json()
 
-# Maintain backward compatibility
+            if result.get('success'):
+                logger.info(f"Closed proposal #{proposal_id}")
+                return {
+                    'success': True,
+                    'transaction_hash': result.get('transactionId'),
+                    'status': result.get('status'),
+                    'explorer_url': f"https://hashscan.io/{self.network}/transaction/{result.get('transactionId')}"
+                }
+            else:
+                return {'success': False, 'error': result.get('error', 'Unknown error')}
+        except Exception as e:
+            logger.error(f"Failed to close proposal: {e}")
+            return {'success': False, 'error': str(e)}
+
+    async def set_funding_goal(self, proposal_id: int, goal_hbar: float) -> Dict[str, Any]:
+        """Set funding goal for an accepted proposal"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.hedera_service_url}/api/contract/set-funding-goal",
+                    json={
+                        "proposalId": proposal_id,
+                        "goal": goal_hbar
+                    }
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                logger.info(f"Set funding goal for proposal #{proposal_id}: {goal_hbar} HBAR")
+                return {
+                    'success': True,
+                    'transaction_hash': result.get('transactionId'),
+                    'goal': goal_hbar
+                }
+            else:
+                return {'success': False, 'error': result.get('error', 'Unknown error')}
+        except Exception as e:
+            logger.error(f"Failed to set funding goal: {e}")
+            return {'success': False, 'error': str(e)}
+
+    async def donate_to_proposal(self, proposal_id: int, amount_hbar: float) -> Dict[str, Any]:
+        """Donate HBAR to an accepted proposal"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.hedera_service_url}/api/contract/donate",
+                    json={
+                        "proposalId": proposal_id,
+                        "amount": amount_hbar
+                    }
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                logger.info(f"Donated {amount_hbar} HBAR to proposal #{proposal_id}")
+                return {
+                    'success': True,
+                    'transaction_hash': result.get('transactionId'),
+                    'amount': amount_hbar,
+                    'explorer_url': f"https://hashscan.io/{self.network}/transaction/{result.get('transactionId')}"
+                }
+            else:
+                return {'success': False, 'error': result.get('error', 'Unknown error')}
+        except Exception as e:
+            logger.error(f"Failed to donate: {e}")
+            return {'success': False, 'error': str(e)}
+
+    async def get_donation_progress(self, proposal_id: int) -> Dict[str, Any]:
+        """Get fundraising progress for a proposal"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    f"{self.hedera_service_url}/api/contract/donation-progress/{proposal_id}"
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                return {
+                    'success': True,
+                    'raised': result.get('raised', 0),
+                    'goal': result.get('goal', 0),
+                    'percentage': result.get('percentage', 0)
+                }
+            else:
+                return {'success': False, 'error': result.get('error', 'Unknown error')}
+        except Exception as e:
+            logger.error(f"Failed to get donation progress: {e}")
+            return {'success': False, 'error': str(e)}
+
+    async def withdraw_funds(self, proposal_id: int, recipient_address: str) -> Dict[str, Any]:
+        """Withdraw funds from a proposal (owner only)"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.hedera_service_url}/api/contract/withdraw-funds",
+                    json={
+                        "proposalId": proposal_id,
+                        "recipient": recipient_address
+                    }
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                logger.info(f"Withdrew funds from proposal #{proposal_id}")
+                return {
+                    'success': True,
+                    'transaction_hash': result.get('transactionId'),
+                    'explorer_url': f"https://hashscan.io/{self.network}/transaction/{result.get('transactionId')}"
+                }
+            else:
+                return {'success': False, 'error': result.get('error', 'Unknown error')}
+        except Exception as e:
+            logger.error(f"Failed to withdraw funds: {e}")
+            return {'success': False, 'error': str(e)}
+
 BlockchainService = HederaBlockchainService

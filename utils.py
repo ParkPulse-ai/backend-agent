@@ -70,21 +70,17 @@ def compute_pm25(geometry):
     Returns PM2.5 concentration in μg/m³
     """
     try:
-        # Use GHAP monthly PM2.5 dataset for recent data
         pm25_collection = ee.ImageCollection("projects/sat-io/open-datasets/GHAP/GHAP_M1K_PM25")
-
-        # Filter for recent data (last available year)
         recent_pm25 = pm25_collection \
             .filterBounds(geometry) \
             .filterDate("2022-01-01", "2022-12-31") \
             .select("b1") \
             .mean()
-
-        # Calculate mean PM2.5 concentration for the area
+        
         stats = recent_pm25.reduceRegion(
             reducer=ee.Reducer.mean(),
             geometry=geometry,
-            scale=1000,  # 1km resolution
+            scale=1000,
             maxPixels=1e9
         )
 
@@ -93,7 +89,6 @@ def compute_pm25(geometry):
 
     except Exception as e:
         logger.error(f"Error computing PM2.5: {e}")
-        # Fallback to Sentinel-5P data if GHAP fails
         try:
             sentinel5p = ee.ImageCollection("COPERNICUS/S5P/NRTI/L3_AER_AI") \
                 .filterBounds(geometry) \
@@ -107,11 +102,9 @@ def compute_pm25(geometry):
                 scale=1000,
                 maxPixels=1e9
             )
-            # Convert aerosol index to approximate PM2.5 (rough estimate)
             aerosol_index = stats.getInfo().get("absorbing_aerosol_index", None)
             if aerosol_index:
-                # Rough conversion: aerosol index to PM2.5 estimate
-                return aerosol_index * 10  # Approximate conversion factor
+                return aerosol_index * 10
             return None
         except:
             return None
@@ -148,13 +141,9 @@ def assess_air_quality_and_damage(geometry):
                 "health_impact": "Data unavailable"
             }
 
-        # WHO Air Quality Guidelines (2021): Annual PM2.5 guideline = 5 μg/m³
         who_annual_guideline = 5.0
-
-        # EPA National Ambient Air Quality Standards: Annual PM2.5 = 12 μg/m³
         epa_annual_standard = 12.0
 
-        # Health risk categorization
         if pm25_value <= 5:
             health_risk = "Low"
             damage_level = "Minimal environmental impact"
@@ -180,7 +169,6 @@ def assess_air_quality_and_damage(geometry):
             damage_level = "Critical environmental damage"
             health_impact = "Health warnings - everyone should avoid outdoor activities"
 
-        # Calculate exceedance factors
         who_exceedance = pm25_value / who_annual_guideline
         epa_exceedance = pm25_value / epa_annual_standard
 

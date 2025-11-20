@@ -36,10 +36,7 @@ from agent import handle_agent_request, handle_analyze_request, handle_ndvi_requ
 
 load_dotenv()
 
-# Suppress pydantic warnings from google-genai package
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-
-# Session storage for tracking removal analysis results
 session_storage: Dict[str, Dict[str, Any]] = {}
 
 gee_project_id = os.getenv('GEE_PROJECT_ID')
@@ -47,7 +44,6 @@ ee.Initialize(project=gee_project_id)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -123,10 +119,8 @@ async def get_parks_by_zipcode(zipcode: str):
     """Get parks by zipcode"""
     try:
         logger.info(f"GET /api/parks/{zipcode} - Fetching parks for zipcode")
-        # Create location query
         query = LocationQuery(zip=zipcode)
 
-        # Query parks from database
         feature_collection = await query_parks_by_location(query)
 
         if not feature_collection or not feature_collection.get('features'):
@@ -145,28 +139,34 @@ async def get_parks_by_zipcode(zipcode: str):
         logger.error(f"Error fetching parks for zipcode {zipcode}: {e}")
         return {"success": False, "error": str(e)}
 
-# Blockchain/Proposals endpoints
 @app.get("/api/proposals")
 async def get_proposals():
-    """Get all active proposals from Hedera blockchain"""
+    """Get all proposals (active, accepted, rejected) from Hedera blockchain"""
     try:
         blockchain_service = BlockchainService()
 
         if not await blockchain_service.is_connected():
             return {"success": False, "error": "Hedera blockchain not connected"}
 
-        # Get all active proposal IDs
-        active_proposal_ids = await blockchain_service.get_all_active_proposals()
+        import asyncio
+        active_ids_task = blockchain_service.get_all_active_proposals()
+        accepted_ids_task = blockchain_service.get_all_accepted_proposals()
+        rejected_ids_task = blockchain_service.get_all_rejected_proposals()
+
+        active_ids, accepted_ids, rejected_ids = await asyncio.gather(
+            active_ids_task,
+            accepted_ids_task,
+            rejected_ids_task
+        )
+
+        all_proposal_ids = list(set(active_ids + accepted_ids + rejected_ids))
 
         proposals = []
-        for proposal_id in active_proposal_ids:
+        for proposal_id in all_proposal_ids:
             try:
-                # Get proposal from Hedera blockchain
                 proposal_data = await blockchain_service.get_proposal(proposal_id)
-
                 if proposal_data:
                     proposals.append(proposal_data)
-
             except Exception as e:
                 logger.error(f"Error fetching proposal {proposal_id}: {e}")
                 continue
@@ -190,7 +190,6 @@ async def get_proposal_details(proposal_id: int):
         if not await blockchain_service.is_connected():
             return {"success": False, "error": "Hedera blockchain not connected"}
 
-        # Get proposal from Hedera blockchain
         proposal = await blockchain_service.get_proposal(proposal_id)
 
         if not proposal:
@@ -210,8 +209,6 @@ async def get_contract_info():
     """Get Hedera contract info for frontend integration"""
     try:
         blockchain_service = BlockchainService()
-
-        # Get contract info from Hedera service
         contract_info = await blockchain_service.get_contract_info()
 
         return {
@@ -235,10 +232,7 @@ async def create_proposal(proposal_data: dict):
 
         if not await blockchain_service.is_connected():
             return {"success": False, "error": "Hedera blockchain not connected"}
-
-        # Create proposal on blockchain
         result = await blockchain_service.create_proposal_on_blockchain(proposal_data)
-
         return result
 
     except Exception as e:

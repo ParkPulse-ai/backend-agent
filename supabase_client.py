@@ -5,7 +5,6 @@ from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
 
-# Initialize Supabase client
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
@@ -22,18 +21,6 @@ else:
 
 
 async def check_user_authorization(wallet_address: str) -> dict:
-    """
-    Check if a user is authorized to create proposals (government employee)
-
-    Args:
-        wallet_address: Hedera wallet address (e.g., '0.0.6590812')
-
-    Returns:
-        dict with keys:
-            - authorized: bool
-            - user: dict or None
-            - error: str or None
-    """
     if not supabase:
         return {
             "authorized": False,
@@ -49,7 +36,6 @@ async def check_user_authorization(wallet_address: str) -> dict:
         }
 
     try:
-        # Query hedera_users table
         response = supabase.table('hedera_users') \
             .select('wallet_address, name, email, is_government_employee') \
             .eq('wallet_address', wallet_address) \
@@ -68,7 +54,6 @@ async def check_user_authorization(wallet_address: str) -> dict:
                 "error": None
             }
         else:
-            # User not found in database
             logger.warning(f"User not found: {wallet_address}")
             return {
                 "authorized": False,
@@ -86,15 +71,6 @@ async def check_user_authorization(wallet_address: str) -> dict:
 
 
 async def get_user_profile(wallet_address: str) -> dict:
-    """
-    Get user profile from Supabase
-
-    Args:
-        wallet_address: Hedera wallet address
-
-    Returns:
-        dict with user profile data or None
-    """
     if not supabase or not wallet_address:
         return None
 

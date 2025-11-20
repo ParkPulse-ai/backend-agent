@@ -8,9 +8,9 @@ module.exports = {
     settings: {
       optimizer: {
         enabled: true,
-        runs: 1000 // Higher runs = smaller bytecode, more gas per execution
+        runs: 1000
       },
-      viaIR: true // Enable IR-based optimizer for better optimization
+      viaIR: true
     }
   },
   networks: {

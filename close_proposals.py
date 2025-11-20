@@ -1,7 +1,3 @@
-"""
-Script to close all active proposals that have passed their end date
-"""
-
 import os
 import asyncio
 import logging
@@ -11,12 +7,9 @@ from flow_py_sdk.cadence import Address
 from flow_py_sdk.signer import SignAlgo, HashAlgo
 from datetime import datetime
 
-# Load environment variables
 load_dotenv()
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 class ProposalCloser:
     def __init__(self):
@@ -25,7 +18,6 @@ class ProposalCloser:
         self.address = os.getenv('FLOW_ADDRESS', '').replace('0x', '')
         self.contract_address = os.getenv('FLOW_CONTRACT_ADDRESS', self.address).replace('0x', '')
 
-        # Network configuration
         network_configs = {
             'testnet': {
                 'host': 'access.devnet.nodes.onflow.org',
@@ -45,7 +37,6 @@ class ProposalCloser:
         self.access_node_host = config['host']
         self.access_node_port = config['port']
 
-        # Initialize signer
         self.signer = InMemorySigner(
             hash_algo=HashAlgo.SHA3_256,
             sign_algo=SignAlgo.ECDSA_P256,
@@ -120,11 +111,7 @@ class ProposalCloser:
             async with flow_client(host=self.access_node_host, port=self.access_node_port) as client:
                 account_address = Address.from_hex(self.address)
                 account = await client.get_account_at_latest_block(address=account_address.bytes)
-
-                # Get latest block
                 latest_block = await client.get_latest_block()
-
-                # Transaction to update proposal status
                 transaction_script = f'''
                     import CommunityVoting from 0x{self.contract_address}
 
@@ -145,7 +132,6 @@ class ProposalCloser:
                     }}
                 '''
 
-                # Build transaction
                 proposal_key = ProposalKey(
                     key_address=account_address,
                     key_id=0,
@@ -159,20 +145,14 @@ class ProposalCloser:
                     proposal_key=proposal_key
                 )
 
-                # Add authorizers
                 tx.add_authorizers(account_address)
-
-                # Add arguments
                 tx.add_arguments(cadence.UInt64(proposal_id))
-
-                # Sign transaction
                 tx = tx.with_envelope_signature(
                     account_address,
                     0,
                     self.signer
                 )
 
-                # Send transaction
                 logger.info(f"Sending transaction to close proposal {proposal_id}...")
                 tx_grpc = tx.to_signed_grpc()
                 tx_result = await client.send_transaction(transaction=tx_grpc)
@@ -180,7 +160,6 @@ class ProposalCloser:
 
                 logger.info(f"Transaction sent: {tx_id}")
 
-                # Wait for transaction to be sealed
                 max_attempts = 30
                 attempt = 0
                 while attempt < max_attempts:
@@ -188,12 +167,12 @@ class ProposalCloser:
 
                     tx_result_response = await client.get_transaction_result(id=tx_result.id)
 
-                    if tx_result_response.status >= 4:  # SEALED
+                    if tx_result_response.status >= 4:
                         if tx_result_response.error_message:
                             logger.error(f"Transaction failed: {tx_result_response.error_message}")
                             return False
 
-                        logger.info(f"✅ Proposal {proposal_id} closed successfully!")
+                        logger.info(f"Proposal {proposal_id} closed successfully!")
                         return True
 
                     attempt += 1
@@ -225,10 +204,7 @@ class ProposalCloser:
         failed_count = 0
 
         for proposal_id in active_proposals:
-            logger.info(f"\n{'='*60}")
             logger.info(f"Processing Proposal ID: {proposal_id}")
-
-            # Get proposal details
             proposal = await self.get_proposal_details(proposal_id)
 
             if not proposal:
@@ -236,7 +212,6 @@ class ProposalCloser:
                 failed_count += 1
                 continue
 
-            # Extract end date from proposal
             proposal_struct = proposal.value if hasattr(proposal, 'value') else proposal
 
             if hasattr(proposal_struct, 'fields') and isinstance(proposal_struct.fields, dict):
@@ -264,11 +239,7 @@ class ProposalCloser:
             else:
                 logger.warning("Unexpected proposal structure")
                 failed_count += 1
-
-        # Summary
-        logger.info(f"\n{'='*60}")
-        logger.info("SUMMARY")
-        logger.info(f"{'='*60}")
+                
         logger.info(f"Total active proposals: {len(active_proposals)}")
         logger.info(f"Successfully closed: {closed_count}")
         logger.info(f"Skipped (still active): {skipped_count}")
@@ -277,19 +248,8 @@ class ProposalCloser:
 
 async def main():
     """Main function to run the script"""
-    print("""
-╔══════════════════════════════════════════════════════════════╗
-║       ParkPulse.ai - Proposal Closure Script                ║
-║  This script will close all active proposals that have      ║
-║  passed their end date on the Flow blockchain               ║
-╚══════════════════════════════════════════════════════════════╝
-    """)
-
     closer = ProposalCloser()
     await closer.close_all_active_proposals()
-
-    print("\n✅ Script completed!")
-
 
 if __name__ == "__main__":
     asyncio.run(main())

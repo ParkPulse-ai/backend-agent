@@ -1,8 +1,3 @@
-"""
-Email Service for ParkPulse.ai
-Handles sending email notifications for proposal creation
-"""
-
 import os
 import logging
 import smtplib
@@ -44,20 +39,17 @@ class EmailService:
             bool: True if email sent successfully, False otherwise
         """
         try:
-            # Parse end date
             try:
                 parsed_date = datetime.strptime(end_date, "%B %d, %Y")
                 formatted_date = parsed_date.strftime("%B %d, %Y")
             except:
                 formatted_date = end_date
 
-            # Create message
             msg = MIMEMultipart('alternative')
             msg['Subject'] = f'🏛️ New Community Proposal: {park_name} Protection Initiative'
             msg['From'] = f'ParkPulse <{self.sender_email}>'
             msg['To'] = recipient_email
 
-            # Create plain text version
             text_content = f"""
 ParkPulse.ai - Community Voting Platform
 
@@ -76,7 +68,6 @@ Vote Now: {self.app_url}/proposal
 This is an automated notification from ParkPulse.ai
             """
 
-            # Create HTML version
             html_content = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -178,13 +169,11 @@ This is an automated notification from ParkPulse.ai
 </html>
             """
 
-            # Attach parts
             part1 = MIMEText(text_content, 'plain')
             part2 = MIMEText(html_content, 'html')
             msg.attach(part1)
             msg.attach(part2)
 
-            # Send email
             logger.info(f"Sending proposal notification email to {recipient_email}")
 
             with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
@@ -192,7 +181,7 @@ This is an automated notification from ParkPulse.ai
                 server.login(self.sender_email, self.sender_password)
                 server.send_message(msg)
 
-            logger.info(f"✅ Proposal notification email sent successfully to {recipient_email}")
+            logger.info(f"Proposal notification email sent successfully to {recipient_email}")
             return True
 
         except Exception as e:

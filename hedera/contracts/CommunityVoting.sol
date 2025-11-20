@@ -25,6 +25,25 @@ contract CommunityVoting {
 
     event ContractInitialized(address indexed deployer);
 
+    event DonationReceived(
+        uint64 indexed proposalId,
+        address indexed donor,
+        uint256 amount,
+        uint256 timestamp
+    );
+
+    event FundingGoalSet(
+        uint64 indexed proposalId,
+        uint256 goal
+    );
+
+    event FundsWithdrawn(
+        uint64 indexed proposalId,
+        address indexed recipient,
+        uint256 amount,
+        uint256 timestamp
+    );
+
     enum ProposalStatus {
         Active,
         Accepted,
@@ -47,6 +66,12 @@ contract CommunityVoting {
         uint64 totalAffectedPopulation;
     }
 
+    struct Donation {
+        address donor;
+        uint256 amount;
+        uint256 timestamp;
+    }
+
     struct Proposal {
         uint64 id;
         string parkName;
@@ -58,17 +83,20 @@ contract CommunityVoting {
         uint64 noVotes;
         EnvironmentalData environmentalData;
         Demographics demographics;
-        string creatorAccountId;  // Hedera account ID in 0.0.XXXXX format
+        string creatorAccountId;
+        uint256 fundingGoal;
+        uint256 totalFundsRaised;
+        bool fundingEnabled;
     }
 
-    // State variables
     mapping(uint64 => Proposal) public proposals;
     mapping(uint64 => mapping(address => bool)) public userVotes;
     mapping(uint64 => mapping(address => bool)) public hasVoted;
+    mapping(uint64 => Donation[]) public proposalDonations;
+    mapping(uint64 => mapping(address => uint256)) public userDonationTotal;
     uint64 public proposalCounter;
     address public owner;
 
-    // Modifiers
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner can call this function");
         _;
@@ -129,6 +157,9 @@ contract CommunityVoting {
         proposal.environmentalData = environmentalData;
         proposal.demographics = demographics;
         proposal.creatorAccountId = creatorAccountId;
+        proposal.fundingGoal = 0;
+        proposal.totalFundsRaised = 0;
+        proposal.fundingEnabled = false;
 
         emit ProposalCreated(
             proposalId,
@@ -152,11 +183,9 @@ contract CommunityVoting {
         hasNotVoted(proposalId, voter)
         votingPeriodActive(proposalId)
     {
-        // Record the vote
         userVotes[proposalId][voter] = voteValue;
         hasVoted[proposalId][voter] = true;
 
-        // Update vote count
         if (voteValue) {
             proposals[proposalId].yesVotes++;
         } else {
@@ -177,6 +206,7 @@ contract CommunityVoting {
         ProposalStatus newStatus = ProposalStatus.Declined;
         if (proposals[proposalId].yesVotes > proposals[proposalId].noVotes) {
             newStatus = ProposalStatus.Accepted;
+            proposals[proposalId].fundingEnabled = true;
         }
 
         proposals[proposalId].status = newStatus;
@@ -243,14 +273,12 @@ contract CommunityVoting {
     function getAllActiveProposals() public view returns (uint64[] memory) {
         uint64 activeCount = 0;
 
-        // Count active proposals
         for (uint64 i = 1; i <= proposalCounter; i++) {
             if (proposals[i].status == ProposalStatus.Active) {
                 activeCount++;
             }
         }
 
-        // Create array and populate
         uint64[] memory activeProposals = new uint64[](activeCount);
         uint64 index = 0;
 
@@ -264,10 +292,54 @@ contract CommunityVoting {
         return activeProposals;
     }
 
+    function getAllAcceptedProposals() public view returns (uint64[] memory) {
+        uint64 acceptedCount = 0;
+
+        for (uint64 i = 1; i <= proposalCounter; i++) {
+            if (proposals[i].status == ProposalStatus.Accepted) {
+                acceptedCount++;
+            }
+        }
+
+        uint64[] memory acceptedProposals = new uint64[](acceptedCount);
+        uint64 index = 0;
+
+        for (uint64 i = 1; i <= proposalCounter; i++) {
+            if (proposals[i].status == ProposalStatus.Accepted) {
+                acceptedProposals[index] = i;
+                index++;
+            }
+        }
+
+        return acceptedProposals;
+    }
+
+    function getAllRejectedProposals() public view returns (uint64[] memory) {
+        uint64 rejectedCount = 0;
+
+        // Count rejected proposals
+        for (uint64 i = 1; i <= proposalCounter; i++) {
+            if (proposals[i].status == ProposalStatus.Declined) {
+                rejectedCount++;
+            }
+        }
+
+        uint64[] memory rejectedProposals = new uint64[](rejectedCount);
+        uint64 index = 0;
+
+        for (uint64 i = 1; i <= proposalCounter; i++) {
+            if (proposals[i].status == ProposalStatus.Declined) {
+                rejectedProposals[index] = i;
+                index++;
+            }
+        }
+
+        return rejectedProposals;
+    }
+
     function getAllClosedProposals() public view returns (uint64[] memory) {
         uint64 closedCount = 0;
 
-        // Count closed proposals
         for (uint64 i = 1; i <= proposalCounter; i++) {
             if (proposals[i].status == ProposalStatus.Accepted ||
                 proposals[i].status == ProposalStatus.Declined) {
@@ -275,7 +347,6 @@ contract CommunityVoting {
             }
         }
 
-        // Create array and populate
         uint64[] memory closedProposals = new uint64[](closedCount);
         uint64 index = 0;
 
@@ -293,4 +364,82 @@ contract CommunityVoting {
     function getTotalProposals() public view returns (uint64) {
         return proposalCounter;
     }
+
+    function setFundingGoal(uint64 proposalId, uint256 goal)
+        public
+        onlyOwner
+        proposalExists(proposalId)
+    {
+        require(proposals[proposalId].status == ProposalStatus.Accepted, "Proposal must be accepted");
+        proposals[proposalId].fundingGoal = goal;
+        emit FundingGoalSet(proposalId, goal);
+    }
+
+    function donateToProposal(uint64 proposalId)
+        public
+        payable
+        proposalExists(proposalId)
+    {
+        require(proposals[proposalId].status == ProposalStatus.Accepted, "Proposal not accepted");
+        require(proposals[proposalId].fundingEnabled, "Funding not enabled");
+        require(msg.value > 0, "Must send HBAR");
+
+        proposalDonations[proposalId].push(Donation({
+            donor: msg.sender,
+            amount: msg.value,
+            timestamp: block.timestamp
+        }));
+
+        userDonationTotal[proposalId][msg.sender] += msg.value;
+        proposals[proposalId].totalFundsRaised += msg.value;
+
+        emit DonationReceived(proposalId, msg.sender, msg.value, block.timestamp);
+    }
+
+    function withdrawFunds(uint64 proposalId, address payable recipient)
+        public
+        onlyOwner
+        proposalExists(proposalId)
+    {
+        require(proposals[proposalId].totalFundsRaised > 0, "No funds to withdraw");
+
+        uint256 amount = proposals[proposalId].totalFundsRaised;
+        proposals[proposalId].totalFundsRaised = 0;
+
+        (bool success, ) = recipient.call{value: amount}("");
+        require(success, "Transfer failed");
+
+        emit FundsWithdrawn(proposalId, recipient, amount, block.timestamp);
+    }
+
+    function getDonationProgress(uint64 proposalId)
+        public
+        view
+        proposalExists(proposalId)
+        returns (uint256 raised, uint256 goal, uint256 percentage)
+    {
+        raised = proposals[proposalId].totalFundsRaised;
+        goal = proposals[proposalId].fundingGoal;
+        percentage = goal > 0 ? (raised * 100) / goal : 0;
+    }
+
+    function getProposalDonations(uint64 proposalId)
+        public
+        view
+        proposalExists(proposalId)
+        returns (Donation[] memory)
+    {
+        return proposalDonations[proposalId];
+    }
+
+    function getUserDonationTotal(uint64 proposalId, address user)
+        public
+        view
+        proposalExists(proposalId)
+        returns (uint256)
+    {
+        return userDonationTotal[proposalId][user];
+    }
+
+    receive() external payable {}
 }

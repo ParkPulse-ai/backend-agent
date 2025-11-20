@@ -108,7 +108,6 @@ async def query_parks_by_location(query, simplify_tolerance: float = 0.0002):
 async def query_park_area_by_id(park_id: str):
     supabase = get_supabase()
     try:
-        # Query park data
         response = supabase.table('parks').select(
             'park_name, park_size_, shape_area'
         ).eq('park_id', park_id).limit(1).execute()
@@ -539,8 +538,6 @@ async def get_users_by_zip_code(zip_code: str):
 
         if not response.data:
             return []
-
-        # Extract emails, filtering out any None values
         users = [
             {
                 'email': user['email'],

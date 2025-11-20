@@ -18,7 +18,6 @@ from hedera_blockchain import HederaBlockchainService
 
 logger = logging.getLogger(__name__)
 
-# Import session storage from main module
 def get_session_storage():
     from main import session_storage
     return session_storage
@@ -33,8 +32,6 @@ async def log_agent_response(session_id: str, response: dict):
             hedera_service = HederaBlockchainService()
             agent_message = response.get("reply", "")
             await hedera_service.submit_chat_message(hcs_topic_id, "Agent", agent_message)
-
-            # Add HCS topic ID to response for frontend display
             response["hcsTopicId"] = hcs_topic_id
     except Exception as e:
         logger.warning(f"Failed to log agent response to HCS (non-critical): {e}")
@@ -50,12 +47,10 @@ async def handle_agent_request(request: AgentRequest, client: genai.Client):
         session_id = request.sessionId or str(int(datetime.now().timestamp() * 1000000) % 1000000)
         wallet_address = request.walletAddress
 
-        # Initialize session storage and HCS topic for chat logging
         storage = get_session_storage()
         if session_id not in storage:
             storage[session_id] = {}
 
-        # Create HCS topic for this chat session if not already created
         if "hcs_topic_id" not in storage[session_id]:
             try:
                 hedera_service = HederaBlockchainService()
@@ -68,7 +63,6 @@ async def handle_agent_request(request: AgentRequest, client: genai.Client):
             except Exception as e:
                 logger.warning(f"HCS topic creation failed (non-critical): {e}")
 
-        # Log user message to HCS topic
         hcs_topic_id = storage[session_id].get("hcs_topic_id")
         if hcs_topic_id:
             try:
@@ -77,7 +71,6 @@ async def handle_agent_request(request: AgentRequest, client: genai.Client):
             except Exception as e:
                 logger.warning(f"Failed to log user message to HCS (non-critical): {e}")
 
-        # Enhanced prompt for structured output with more examples
         prompt = f"""Analyze this user query about parks and classify the intent:
 
 User query: "{message}"
@@ -118,7 +111,6 @@ Examples:
 - "hello" -> greeting intent"""
 
         try:
-            # Use a simplified schema that doesn't use $ref or NULL
             schema = {
                 "type": "OBJECT",
                 "properties": {
@@ -149,7 +141,6 @@ Examples:
             )
             logger.info(f"Gemini structured response: {response.text}")
 
-            # Parse the structured JSON response
             parsed = json.loads(response.text)
 
         except Exception as e:
@@ -277,7 +268,6 @@ async def handle_park_removal_impact_intent(parsed, selected_park_id, session_id
         selected_park_id, parsed.get("landUseType", "removed")
     )
 
-    # Store the removal analysis result in session storage
     storage = get_session_storage()
     if session_id not in storage:
         storage[session_id] = {}
@@ -410,7 +400,6 @@ async def handle_create_proposal_intent(selected_park_id, session_id, message, w
 
     storage = get_session_storage()
 
-    # Check if park removal analysis was performed first
     if session_id not in storage or "latest_removal_analysis" not in storage[session_id]:
         return {
             "sessionId": session_id,
@@ -421,8 +410,7 @@ async def handle_create_proposal_intent(selected_park_id, session_id, message, w
     removal_analysis = storage[session_id]["latest_removal_analysis"]
     analysis_data = removal_analysis["analysis_data"]
 
-    # Extract end date from message if provided
-    end_date = "November 30, 2025"  # Default date
+    end_date = "November 30, 2025"
     if message:
         message_lower = message.lower()
         if "november 30" in message_lower or "30th november" in message_lower:
@@ -490,7 +478,6 @@ Based on the environmental impact analysis, removing {park_name} would significa
 *ParkPulse.ai - AI-Powered Urban Intelligence Platform*
 """
 
-    # Generate general description for frontend (without numbers)
     frontend_description_prompt = f"""Generate a neutral, objective 600-character description for a community proposal about {park_name}.
 
 Environmental data:
@@ -516,33 +503,27 @@ Requirements:
         )
         frontend_description = frontend_desc_response.text.strip()
 
-        # Ensure it's under 600 characters
         if len(frontend_description) > 600:
             frontend_description = frontend_description[:597] + "..."
 
         logger.info(f"Generated frontend description ({len(frontend_description)} chars): {frontend_description}")
     except Exception as e:
         logger.error(f"Error generating frontend description with Gemini: {e}")
-        # Fallback to a neutral description
         frontend_description = f"This park provides essential green space serving thousands of local residents including families with children and seniors. Its removal would result in significantly reduced air quality, decreased vegetation health, and loss of recreational opportunities for the surrounding community. The park serves as a vital gathering place where neighbors connect and children play safely. The environmental impact would extend beyond the immediate area, affecting air quality and reducing the overall livability of the neighborhood for current and future residents."
 
-    # Prepare proposal data for blockchain
     proposal_data = {
         "parkId": selected_park_id,
         "parkName": park_name,
         "proposalSummary": proposal_summary,
         "endDate": end_date,
         "analysisData": analysis_data,
-        "frontendDescription": frontend_description,  # For proposals table
+        "frontendDescription": frontend_description,
         "timestamp": datetime.now().isoformat()
     }
 
-    # Try to submit to blockchain
     try:
         from hedera_blockchain import HederaBlockchainService as BlockchainService
         blockchain_service = BlockchainService()
-
-        # Check if blockchain is properly configured
         if not await blockchain_service.is_connected():
             logger.warning("Blockchain not connected, creating proposal locally only")
             return {
@@ -555,17 +536,12 @@ Requirements:
         blockchain_result = await blockchain_service.create_proposal_on_blockchain(proposal_data)
 
         if blockchain_result['success']:
-            # Send email notifications to users in the same zip code
             try:
                 from email_service import email_service
                 from database import get_users_by_zip_code
 
                 proposal_id = blockchain_result.get('proposal_id', 0)
-
-                # Get park's zip code
                 park_zip = analysis_data.get('parkZip') or removal_analysis.get('parkZip')
-
-                # If we don't have zip in analysis, fetch from database
                 if not park_zip and selected_park_id:
                     from database import get_supabase
                     supabase = get_supabase()
@@ -577,15 +553,10 @@ Requirements:
                         logger.error(f"Error fetching park zip: {e}")
 
                 if park_zip:
-                    # Get all users in this zip code
                     users = await get_users_by_zip_code(park_zip)
-
-                    # Use short numbered summary from blockchain for email
                     description = blockchain_result.get('email_summary',
                         f"{park_name}: Environmental impact analysis shows significant changes to vegetation and air quality."
                     )
-
-                    # Send email to each user
                     emails_sent = 0
                     for user in users:
                         try:
@@ -602,22 +573,20 @@ Requirements:
                             logger.error(f"Failed to send email to {user['email']}: {e}")
 
                     if emails_sent > 0:
-                        logger.info(f"✅ Sent {emails_sent} email notifications to users in ZIP {park_zip} for proposal #{proposal_id}")
+                        logger.info(f"Sent {emails_sent} email notifications to users in ZIP {park_zip} for proposal #{proposal_id}")
                     else:
-                        logger.warning(f"⚠️ No emails sent for proposal #{proposal_id} (ZIP: {park_zip}, {len(users)} users found)")
+                        logger.warning(f"No emails sent for proposal #{proposal_id} (ZIP: {park_zip}, {len(users)} users found)")
                 else:
-                    logger.warning(f"⚠️ Could not determine park ZIP code, no emails sent for proposal #{proposal_id}")
+                    logger.warning(f"Could not determine park ZIP code, no emails sent for proposal #{proposal_id}")
 
             except Exception as e:
                 logger.error(f"Error sending email notifications: {e}")
                 import traceback
                 traceback.print_exc()
 
-            # Success - include blockchain details in reply
             reply = f"""Community proposal created for {park_name} with deadline {end_date}.
 
 ✅ **Successfully submitted to Flow testnet blockchain!**
-📋 Proposal ID: #{blockchain_result.get('proposal_id', 'Pending')}
 🔗 Transaction: {blockchain_result['transaction_hash'][:10]}...{blockchain_result['transaction_hash'][-8:]}
 🌐 View on explorer: {blockchain_result['explorer_url']}
 
@@ -633,7 +602,6 @@ The proposal includes comprehensive environmental impact analysis and is ready f
                 }
             }
         else:
-            # Blockchain failed - create locally with warning
             reply = f"""Community proposal created for {park_name} with deadline {end_date}.
 
 ⚠️ **Blockchain submission failed:** {blockchain_result.get('error', 'Unknown error')}
