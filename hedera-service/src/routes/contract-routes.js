@@ -26,7 +26,7 @@ contractRoutes.get('/info', async (req, res, next) => {
 
 /**
  * POST /api/contract/deploy
- * Deploy the CommunityVoting contract
+ * Deploy the ParkPulseCommunity contract
  */
 contractRoutes.post('/deploy', async (req, res, next) => {
   try {

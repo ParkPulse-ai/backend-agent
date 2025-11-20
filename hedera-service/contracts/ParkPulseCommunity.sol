@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-contract CommunityVoting {
+contract ParkPulseCommunity {
 
     event ProposalCreated(
         uint64 indexed proposalId,

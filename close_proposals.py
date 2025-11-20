@@ -48,10 +48,10 @@ class ProposalCloser:
         try:
             async with flow_client(host=self.access_node_host, port=self.access_node_port) as client:
                 script_code = f'''
-                    import CommunityVoting from 0x{self.contract_address}
+                    import ParkPulseCommunity from 0x{self.contract_address}
 
                     access(all) fun main(): [UInt64] {{
-                        return CommunityVoting.getAllActiveProposals()
+                        return ParkPulseCommunity.getAllActiveProposals()
                     }}
                 '''
 
@@ -79,10 +79,10 @@ class ProposalCloser:
         try:
             async with flow_client(host=self.access_node_host, port=self.access_node_port) as client:
                 script_code = f'''
-                    import CommunityVoting from 0x{self.contract_address}
+                    import ParkPulseCommunity from 0x{self.contract_address}
 
-                    access(all) fun main(proposalId: UInt64): CommunityVoting.Proposal? {{
-                        return CommunityVoting.getProposal(proposalId: proposalId)
+                    access(all) fun main(proposalId: UInt64): ParkPulseCommunity.Proposal? {{
+                        return ParkPulseCommunity.getProposal(proposalId: proposalId)
                     }}
                 '''
 
@@ -113,15 +113,15 @@ class ProposalCloser:
                 account = await client.get_account_at_latest_block(address=account_address.bytes)
                 latest_block = await client.get_latest_block()
                 transaction_script = f'''
-                    import CommunityVoting from 0x{self.contract_address}
+                    import ParkPulseCommunity from 0x{self.contract_address}
 
                     transaction(proposalId: UInt64) {{
-                        let admin: &CommunityVoting.Admin
+                        let admin: &ParkPulseCommunity.Admin
 
                         prepare(signer: auth(BorrowValue) &Account) {{
                             // Borrow the admin resource from storage
-                            self.admin = signer.storage.borrow<&CommunityVoting.Admin>(
-                                from: CommunityVoting.AdminStoragePath
+                            self.admin = signer.storage.borrow<&ParkPulseCommunity.Admin>(
+                                from: ParkPulseCommunity.AdminStoragePath
                             ) ?? panic("Could not borrow admin resource")
                         }}
 

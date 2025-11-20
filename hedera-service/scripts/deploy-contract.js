@@ -2,8 +2,7 @@ import {
   Client,
   AccountId,
   PrivateKey,
-  ContractCreateFlow,
-  Hbar
+  ContractCreateFlow
 } from '@hashgraph/sdk';
 import fs from 'fs';
 import path from 'path';
@@ -16,7 +15,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function main() {
-  console.log('Deploying CommunityVoting contract to Hedera...\n');
+  console.log('Deploying ParkPulseCommunity contract to Hedera...\n');
 
   const network = process.env.HEDERA_NETWORK || 'testnet';
   const accountId = AccountId.fromString(process.env.HEDERA_ACCOUNT_ID);
@@ -30,10 +29,10 @@ async function main() {
 
   console.log(`Network: ${network}`);
   console.log(`Account: ${accountId.toString()}\n`);
-  const contractPath = path.join(__dirname, '../../parkpulsebe/hedera/artifacts/contracts/CommunityVoting.sol/CommunityVoting.json');
+  const contractPath = path.join(__dirname, '../artifacts/contracts/ParkPulseCommunity.sol/ParkPulseCommunity.json');
 
   if (!fs.existsSync(contractPath)) {
-    throw new Error(`Contract artifact not found at ${contractPath}\nRun 'npm run compile' first in parkpulsebe/hedera/`);
+    throw new Error(`Contract artifact not found at ${contractPath}\nRun 'npm run compile' first in hedera-service/`);
   }
 
   const contractJson = JSON.parse(fs.readFileSync(contractPath, 'utf8'));

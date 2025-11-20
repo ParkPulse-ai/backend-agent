@@ -6,7 +6,7 @@ Node.js microservice that provides a REST API for interacting with Hedera Hashgr
 
 ## Features
 
-- **Smart Contract Service**: Deploy and interact with CommunityVoting Solidity contract
+- **Smart Contract Service**: Deploy and interact with ParkPulseCommunity Solidity contract
 - **Hedera Consensus Service (HCS)**: Immutable, timestamped voting logs
 - **Solidity Contracts**: Smart contracts located in `contracts/` directory
 - **REST API**: Python backend-friendly HTTP interface
@@ -17,7 +17,7 @@ Node.js microservice that provides a REST API for interacting with Hedera Hashgr
 ```
 parkpulsebe/hedera-service/
 ├── contracts/           # Solidity smart contracts
-│   ├── CommunityVoting.sol
+│   ├── ParkPulseCommunity.sol
 │   └── SimpleVoting.sol
 ├── src/                # Node.js service code
 │   ├── index.js       # Main entry point

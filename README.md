@@ -14,11 +14,11 @@
 
 | Contract Name | Contract Address | Explorer Link |
 |--------------|------------------|---------------|
-| **CommunityVoting** | `0xd63bdc807b56f6a5` | [View on FlowScan](https://testnet.flowscan.io/contract/A.d63bdc807b56f6a5.CommunityVoting) |
+| **ParkPulseCommunity** | `0xd63bdc807b56f6a5` | [View on FlowScan](https://testnet.flowscan.io/contract/A.d63bdc807b56f6a5.ParkPulseCommunity) |
 
 **Network:** Flow Testnet
 **Contract Address:** `0xd63bdc807b56f6a5`
-**View on Explorer:** https://testnet.flowscan.io/contract/A.d63bdc807b56f6a5.CommunityVoting
+**View on Explorer:** https://testnet.flowscan.io/contract/A.d63bdc807b56f6a5.ParkPulseCommunity
 
 ### Contract Capabilities
 - Create park protection proposals with environmental data
@@ -253,7 +253,7 @@ ParkPulseAi/
 ├── parkpulsebe/                       # Backend (Python)
 │   ├── cadence/                       # Flow Cadence contracts
 │   │   ├── contracts/
-│   │   │   └── CommunityVoting.cdc    # Main voting contract
+│   │   │   └── ParkPulseCommunity.cdc    # Main voting contract
 │   │   ├── transactions/              # Write operations
 │   │   │   ├── create_proposal.cdc
 │   │   │   └── vote.cdc
@@ -290,7 +290,7 @@ ParkPulseAi/
 [https://github.com/yourusername/ParkPulseAi](https://github.com/yourusername/ParkPulseAi)
 
 ### Flow Resources
-- **Contract on FlowScan**: [View Contract](https://testnet.flowscan.io/contract/A.d63bdc807b56f6a5.CommunityVoting)
+- **Contract on FlowScan**: [View Contract](https://testnet.flowscan.io/contract/A.d63bdc807b56f6a5.ParkPulseCommunity)
 - **Flow Documentation**: [https://developers.flow.com/](https://developers.flow.com/)
 - **Cadence Language**: [https://cadence-lang.org/](https://cadence-lang.org/)
 
