@@ -53,6 +53,34 @@ app.get('/health', async (req, res) => {
 app.use('/api/contract', contractRoutes);
 app.use('/api/hcs', hcsRoutes);
 
+app.get('/api/balances/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const result = await hederaService.getUserBalances(accountId);
+    res.json(result);
+  } catch (error) {
+    console.error('Error getting user balances:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/api/check-token-association/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const result = await hederaService.checkTokenAssociation(accountId);
+    res.json(result);
+  } catch (error) {
+    console.error('Error checking token association:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 app.use((err, req, res, next) => {
   console.error('Error:', err);
   res.status(500).json({

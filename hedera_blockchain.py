@@ -542,4 +542,29 @@ Return only the factual summary."""
             logger.error(f"Failed to withdraw funds: {e}")
             return {'success': False, 'error': str(e)}
 
+    async def get_user_balances(self, account_id: str) -> Dict[str, Any]:
+        """Get user token balances (HBAR, USDC, PARK)"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    f"{self.hedera_service_url}/api/balances/{account_id}"
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                return {
+                    'success': True,
+                    'balances': result.get('balances', {
+                        'hbar': 0,
+                        'usdc': 0,
+                        'park': 0
+                    })
+                }
+            else:
+                return {'success': False, 'error': result.get('error', 'Unknown error')}
+        except Exception as e:
+            logger.error(f"Failed to get user balances: {e}")
+            return {'success': False, 'error': str(e)}
+
 BlockchainService = HederaBlockchainService

@@ -239,6 +239,23 @@ async def create_proposal(proposal_data: dict):
         logger.error(f"Error creating proposal: {e}")
         return {"success": False, "error": str(e)}
 
+@app.get("/api/user-balances")
+async def get_user_balances(accountId: str):
+    """Get user token balances (HBAR, USDC, PARK)"""
+    try:
+        blockchain_service = BlockchainService()
+
+        if not await blockchain_service.is_connected():
+            return {"success": False, "error": "Hedera blockchain not connected"}
+
+        # Get balances from Hedera service
+        result = await blockchain_service.get_user_balances(accountId)
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting user balances for {accountId}: {e}")
+        return {"success": False, "error": str(e)}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 4000)), reload=True)

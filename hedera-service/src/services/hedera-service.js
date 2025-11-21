@@ -13,7 +13,9 @@ import {
   AccountBalanceQuery,
   ContractCreateFlow,
   FileCreateTransaction,
-  FileAppendTransaction
+  FileAppendTransaction,
+  TransferTransaction,
+  TokenId
 } from '@hashgraph/sdk';
 import { ethers } from 'ethers';
 import fs from 'fs';
@@ -57,11 +59,28 @@ export class HederaService {
       this.votingTopicId = null;
     }
 
-    console.log('Hedera Service initialized');
+    // Park Token ID for voting rewards
+    const parkTokenIdEnv = process.env.PARK_TOKEN_ID;
+    if (parkTokenIdEnv) {
+      try {
+        TokenId.fromString(parkTokenIdEnv);
+        this.parkTokenId = parkTokenIdEnv;
+      } catch (error) {
+        console.warn(`Invalid PARK_TOKEN_ID format: ${parkTokenIdEnv}`);
+        this.parkTokenId = null;
+      }
+    } else {
+      this.parkTokenId = null;
+    }
+
+    console.log('\n=== Hedera Service initialized ===');
     console.log(`Network: ${this.network}`);
     console.log(`Account: ${this.accountId.toString()}`);
     console.log(`Contract: ${this.contractId || 'Not deployed'}`);
     console.log(`HCS Topic: ${this.votingTopicId || 'Not created'}`);
+    console.log(`Park Token: ${this.parkTokenId || 'Not created'}`);
+    console.log(`Park Token Rewards: ${this.parkTokenId ? 'ENABLED ✅' : 'DISABLED ❌'}`);
+    console.log('===================================\n');
   }
 
   accountIdToEvmAddress(accountIdString) {
@@ -216,6 +235,11 @@ export class HederaService {
       throw new Error('Contract not deployed');
     }
 
+    console.log(`\n🗳️  === SUBMITTING VOTE ===`);
+    console.log(`Proposal ID: ${proposalId}`);
+    console.log(`Vote: ${vote ? 'YES' : 'NO'}`);
+    console.log(`Voter: ${voter}`);
+
     try {
       let voterEvmAddress = voter;
       if (voter.startsWith('0.0.')) {
@@ -243,6 +267,22 @@ export class HederaService {
       const receipt = await tx.getReceipt(this.client);
       const transactionId = tx.transactionId.toString();
 
+      // Transfer 5 PARK tokens as voting reward
+      let tokenReward = null;
+      if (voter.startsWith('0.0.')) {
+        console.log(`\nAttempting to transfer 5 PARK tokens to voter: ${voter}`);
+        tokenReward = await this.transferParkTokens(voter, 5);
+        if (tokenReward && !tokenReward.success) {
+          console.warn(`Token transfer failed: ${tokenReward.error}`);
+          if (tokenReward.error && tokenReward.error.includes('TOKEN_NOT_ASSOCIATED_TO_ACCOUNT')) {
+            console.warn(`User needs to associate PARK token with their account first!`);
+            console.warn(`Run: node scripts/associateParkToken.js ${voter} <PRIVATE_KEY>`);
+          }
+        } else if (tokenReward && tokenReward.success) {
+          console.log(`Successfully transferred 5 PARK tokens! TX: ${tokenReward.transactionId}`);
+        }
+      }
+
       if (this.votingTopicId) {
         await this.submitToHCS({
           type: 'VOTE_CAST',
@@ -250,17 +290,24 @@ export class HederaService {
           vote,
           voter,
           transactionId,
+          tokenReward: tokenReward?.success ? tokenReward.transactionId : null,
           timestamp: Date.now()
         });
       }
 
+      console.log(`Vote submitted successfully!`);
+      console.log(`Transaction ID: ${transactionId}`);
+      console.log(`Token Reward: ${tokenReward?.success ? 'Sent' : 'Failed or not sent'}`);
+      console.log(`=========================\n`);
+
       return {
         success: true,
         transactionId,
-        status: receipt.status.toString()
+        status: receipt.status.toString(),
+        tokenReward
       };
     } catch (error) {
-      console.error('Submit vote failed:', error);
+      console.error('❌ Submit vote failed:', error);
       throw error;
     }
   }
@@ -738,7 +785,7 @@ export class HederaService {
         .setFunctionParameters(Buffer.from(encodedData.slice(2), 'hex'))
         .setMaxTransactionFee(new Hbar(2))
         .execute(this.client);
-      
+
       const receipt = await tx.getReceipt(this.client);
       console.log(`Withdrew funds from proposal ${proposalId} to ${recipientAddress}`);
 
@@ -749,6 +796,146 @@ export class HederaService {
     } catch (error) {
       console.error('Withdraw funds failed:', error);
       throw error;
+    }
+  }
+
+  async transferParkTokens(recipientAccountId, amount = 5) {
+    if (!this.parkTokenId) {
+      console.error('Park token not configured! PARK_TOKEN_ID missing in .env');
+      console.error('Add: PARK_TOKEN_ID=0.0.XXXXXXX to .env file');
+      return null;
+    }
+
+    try {
+      const tokenId = TokenId.fromString(this.parkTokenId);
+      const recipient = AccountId.fromString(recipientAccountId);
+
+      // Check treasury balance first
+      try {
+        const treasuryBalance = await new AccountBalanceQuery()
+          .setAccountId(this.accountId)
+          .execute(this.client);
+
+        const parkBalance = treasuryBalance.tokens.get(tokenId);
+        const currentBalance = parkBalance ? parkBalance.toNumber() : 0;
+
+        console.log(`reasury PARK balance: ${currentBalance} tokens`);
+
+        if (currentBalance < amount) {
+          console.error(`Insufficient PARK tokens in treasury! Have ${currentBalance}, need ${amount}`);
+          return {
+            success: false,
+            error: `Insufficient balance: ${currentBalance} PARK tokens available, ${amount} required`
+          };
+        }
+      } catch (balanceError) {
+        console.warn('Could not check treasury balance:', balanceError.message);
+      }
+
+      // Amount in whole tokens (no decimals)
+      const tokenAmount = amount;
+
+      console.log(`Transferring ${amount} PARK tokens to ${recipientAccountId}`);
+
+      const transaction = await new TransferTransaction()
+        .addTokenTransfer(tokenId, this.accountId, -tokenAmount)
+        .addTokenTransfer(tokenId, recipient, tokenAmount)
+        .setMaxTransactionFee(new Hbar(1))
+        .execute(this.client);
+
+      const receipt = await transaction.getReceipt(this.client);
+      const transactionId = transaction.transactionId.toString();
+
+      console.log(`Successfully transferred ${amount} PARK tokens to ${recipientAccountId}`);
+      console.log(`Transaction ID: ${transactionId}`);
+
+      return {
+        success: true,
+        transactionId,
+        amount,
+        recipient: recipientAccountId,
+        status: receipt.status.toString()
+      };
+    } catch (error) {
+      console.error('Park token transfer failed:', error);
+      // Don't throw - voting should succeed even if reward transfer fails
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  async getUserBalances(userAccountId) {
+    try {
+      const accountId = AccountId.fromString(userAccountId);
+
+      const balanceQuery = await new AccountBalanceQuery()
+        .setAccountId(accountId)
+        .execute(this.client);
+
+      const hbarBalance = balanceQuery.hbars.toBigNumber().toNumber();
+
+      let parkBalance = 0;
+      if (this.parkTokenId) {
+        const tokenId = TokenId.fromString(this.parkTokenId);
+        const tokenBalance = balanceQuery.tokens.get(tokenId);
+        if (tokenBalance) {
+          parkBalance = tokenBalance.toNumber(); // Whole tokens (no decimals)
+        }
+      }
+
+      // TODO: Add USDC token balance when USDC token ID is configured
+      const usdcBalance = 0;
+
+      return {
+        success: true,
+        balances: {
+          hbar: hbarBalance,
+          usdc: usdcBalance,
+          park: parkBalance
+        }
+      };
+    } catch (error) {
+      console.error('Get user balances failed:', error);
+      throw error;
+    }
+  }
+
+  async checkTokenAssociation(userAccountId) {
+    if (!this.parkTokenId) {
+      return {
+        success: false,
+        error: 'Park token not configured'
+      };
+    }
+
+    try {
+      const accountId = AccountId.fromString(userAccountId);
+      const tokenId = TokenId.fromString(this.parkTokenId);
+
+      const balanceQuery = await new AccountBalanceQuery()
+        .setAccountId(accountId)
+        .execute(this.client);
+
+      // Check if the token is in the account's token map
+      const hasToken = balanceQuery.tokens.get(tokenId) !== null;
+
+      return {
+        success: true,
+        isAssociated: hasToken,
+        tokenId: this.parkTokenId,
+        message: hasToken
+          ? 'Account is associated with PARK token'
+          : 'Account needs to associate PARK token to receive rewards'
+      };
+    } catch (error) {
+      console.error('Check token association failed:', error);
+      return {
+        success: false,
+        isAssociated: false,
+        error: error.message
+      };
     }
   }
 }
