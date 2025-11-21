@@ -54,3 +54,6 @@ class IntentClassification(BaseModel):
     unit: Optional[Unit] = None
     landUseType: Optional[LandUseType] = None
     metric: Optional[str] = None
+
+class SendTokensRequest(BaseModel):
+    recipientAccountId: str

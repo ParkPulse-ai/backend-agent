@@ -542,6 +542,38 @@ Return only the factual summary."""
             logger.error(f"Failed to withdraw funds: {e}")
             return {'success': False, 'error': str(e)}
 
+    async def send_park_tokens(self, recipient_account_id: str) -> Dict[str, Any]:
+        """Send 5 PARK tokens to a recipient account"""
+        try:
+            payload = {
+                "recipientAccountId": recipient_account_id
+            }
+
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.hedera_service_url}/api/contract/send-park-tokens",
+                    json=payload
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            if result.get('success'):
+                logger.info(f"Successfully sent 5 PARK tokens to {recipient_account_id}. TX: {result.get('transactionId')}")
+                return {
+                    'success': True,
+                    'transaction_hash': result.get('transactionId'),
+                    'explorer_url': f"https://hashscan.io/{self.network}/transaction/{result.get('transactionId')}"
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': result.get('error', 'Unknown error')
+                }
+
+        except Exception as e:
+            logger.error(f"Failed to send PARK tokens: {e}")
+            return {'success': False, 'error': str(e)}
+
     async def get_user_balances(self, account_id: str) -> Dict[str, Any]:
         """Get user token balances (HBAR, USDC, PARK)"""
         try:

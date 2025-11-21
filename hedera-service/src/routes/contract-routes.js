@@ -278,6 +278,29 @@ contractRoutes.post('/donate', async (req, res, next) => {
 });
 
 /**
+ * POST /api/contract/send-park-tokens
+ * Send PARK tokens to a user
+ */
+contractRoutes.post('/send-park-tokens', async (req, res, next) => {
+  try {
+    const hederaService = req.app.locals.hederaService;
+    const { recipientAccountId } = req.body;
+
+    if (!recipientAccountId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field: recipientAccountId'
+      });
+    }
+    const amount = 5; 
+    const result = await hederaService.transferParkTokens(recipientAccountId, amount);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * GET /api/contract/donation-progress/:proposalId
  * Get donation progress for a proposal
  */

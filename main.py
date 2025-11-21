@@ -24,7 +24,8 @@ from database import (
 from hedera_blockchain import HederaBlockchainService as BlockchainService
 from models import (
     AgentRequest, LocationQuery, AnalyzeRequest, NDVIRequest,
-    Intent, LocationType, Unit, LandUseType, IntentClassification
+    Intent, LocationType, Unit, LandUseType, IntentClassification,
+    SendTokensRequest
 )
 from utils import (
     geometry_from_geojson, compute_ndvi, compute_walkability, compute_pm25,
@@ -237,6 +238,25 @@ async def create_proposal(proposal_data: dict):
 
     except Exception as e:
         logger.error(f"Error creating proposal: {e}")
+        return {"success": False, "error": str(e)}
+
+class SendTokensRequest(BaseModel):
+    recipientAccountId: str
+
+@app.post("/api/send-park-tokens")
+async def send_park_tokens_endpoint(request: SendTokensRequest):
+    """Send PARK tokens to a user account"""
+    try:
+        blockchain_service = BlockchainService()
+
+        if not await blockchain_service.is_connected():
+            return {"success": False, "error": "Hedera blockchain not connected"}
+        
+        result = await blockchain_service.send_park_tokens(request.recipientAccountId)
+        return result
+
+    except Exception as e:
+        logger.error(f"Error sending PARK tokens: {e}")
         return {"success": False, "error": str(e)}
 
 @app.get("/api/user-balances")
