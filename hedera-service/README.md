@@ -10,6 +10,7 @@
 |----------|-------|
 | **Contract Name** | ParkPulseCommunity |
 | **Contract ID** | `0.0.7298075` |
+| **PARK Token ID** | `0.0.7298808` |
 | **HCS Topic ID** | `0.0.7284567` |
 | **Network** | Hedera Testnet |
 | **Explorer** | [View on HashScan](https://hashscan.io/testnet/contract/0.0.7298075) |
